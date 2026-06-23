@@ -1,5 +1,5 @@
 ---
-description: Ralph Wiggum plan loop — analyse specs + code, write IMPLEMENTATION_PLAN.md (one fresh pass, capped at 3).
+description: Ralph Wiggum plan loop — analyse specs + code, write IMPLEMENTATION_PLAN.md (iterates up to 3 fresh passes).
 argument-hint: "[goal]"
 ---
 
@@ -59,4 +59,6 @@ Create or update `IMPLEMENTATION_PLAN.md`, following the entry format documented
 
 ## Loop control (Archon)
 
-When `IMPLEMENTATION_PLAN.md` is complete and stable — it accurately reflects the gap between specs and code and needs no further refinement — output exactly `<promise>PLAN_STABLE</promise>`. In most cases the plan settles in a single pass, so emit it as soon as you are confident. Only withhold it (ending the iteration normally) if you made substantive changes this pass and a further review pass would materially improve the plan.
+The planning loop runs up to 3 fresh passes. Plans keep improving through the second and sometimes the third pass, so refine the plan's content and ordering on every pass.
+
+Output exactly `<promise>PLAN_STABLE</promise>` only when this pass changed nothing substantive. Otherwise, end the iteration normally so the loop runs again.
