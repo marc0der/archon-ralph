@@ -14,8 +14,25 @@ It drops a self-contained `.archon/` workflow into your repo that:
 
 ## Requirements
 
-- [Archon CLI](https://archon.diy) (`archon`)
+- **[marc0der/Archon](https://github.com/marc0der/Archon)** — this workflow needs
+  the fork, not upstream Archon (see below). Build/install from its `dev` branch.
 - [Bun](https://bun.sh) (the loop-control scripts run via `bun run`)
+
+### Why the fork?
+
+The PLAN and BUILD nodes are `loop` constructs that reference **extracted command
+files** by name:
+
+```yaml
+loop:
+  command: ralph-plan   # → .archon/commands/ralph-plan.md
+```
+
+Resolving `loop.command:` to an extracted command file isn't supported in upstream
+[Archon](https://archon.diy) yet — it's a change carried in
+[marc0der/Archon](https://github.com/marc0der/Archon) (a fork of
+[coleam00/Archon](https://github.com/coleam00/Archon)). Until it lands upstream,
+run this workflow against the fork.
 
 ## Install into a project
 

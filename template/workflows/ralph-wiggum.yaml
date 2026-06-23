@@ -12,6 +12,10 @@ description: |
         .ralph/<timestamp>/ (like `ralph archive`).
   NOT for: PR reviews, one-off fixes, or PRD/story-driven work (use archon-ralph-dag).
 
+# REQUIRES the marc0der/Archon fork (https://github.com/marc0der/Archon): the
+# PLAN/BUILD loop nodes resolve `loop.command:` to extracted command files
+# (commands/ralph-*.md), which upstream Archon does not yet support.
+#
 # The {{GOAL}} from `ralph -g` maps to $ARGUMENTS.
 #
 # IMPORTANT — model is set at the WORKFLOW level on purpose: loop nodes ignore a
