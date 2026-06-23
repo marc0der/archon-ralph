@@ -1,0 +1,29 @@
+{
+  "name": "archon-ralph",
+  "version": "0.1.0",
+  "description": "Scaffold the Ralph Wiggum autonomous plan/build loop (an Archon workflow) into any project.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "archon-ralph": "bin/cli.ts"
+  },
+  "files": [
+    "bin",
+    "template"
+  ],
+  "keywords": [
+    "archon",
+    "ralph",
+    "ralph-wiggum",
+    "ai",
+    "agent",
+    "workflow",
+    "scaffold"
+  ],
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
