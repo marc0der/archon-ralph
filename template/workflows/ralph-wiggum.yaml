@@ -1,0 +1,97 @@
+name: ralph-wiggum
+description: |
+  Use when: User wants to run the Ralph Wiggum autonomous plan/build loop
+            (a port of marc0der/ralph) on this project.
+  Triggers: "ralph wiggum", "run ralph", "ralph loop", "ralph plan/build".
+  Does: Seeds loop artifacts (like `ralph init`), runs a PLAN loop (up to 3
+        passes) that writes IMPLEMENTATION_PLAN.md from specs/ + the codebase,
+        sizes a BUILD budget (incomplete items + 20% headroom, like ralph),
+        then runs BUILD iterations with a FRESH context each — implementing one
+        plan item, testing, committing, pushing — until the plan is exhausted
+        or the budget is spent. Reports, then archives the artifacts to
+        .ralph/<timestamp>/ (like `ralph archive`).
+  NOT for: PR reviews, one-off fixes, or PRD/story-driven work (use archon-ralph-dag).
+
+# The {{GOAL}} from `ralph -g` maps to $ARGUMENTS.
+#
+# IMPORTANT — model is set at the WORKFLOW level on purpose: loop nodes ignore a
+# per-node `model:` and always use the workflow-level model. Drop to `sonnet`
+# for faster/cheaper iterations; the prompts already delegate heavy reasoning to
+# Opus subagents.
+#
+# IMPORTANT — isolation: `archon workflow run` creates a worktree off the base
+# branch (main) by DEFAULT. To run on your CURRENT checkout (e.g. a feature
+# branch under test), invoke with `--no-worktree`, or `--from <branch>` to base
+# the worktree elsewhere.
+provider: claude
+model: opus
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 1: SEED — scaffold the loop artifacts from templates (mirrors
+  # `ralph init`). Templates live in .archon/ralph/templates/ (auto-copied
+  # into worktrees) and are user-editable, exactly like ralph's templates/.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: seed
+    script: ralph-seed
+    runtime: bun
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 2: PLAN LOOP — analyse specs + code, write IMPLEMENTATION_PLAN.md.
+  # Up to 3 fresh passes (ralph PLAN_DEFAULT_CAP=3). Exits early when stable.
+  # The counter in until_bash makes the 3rd pass a graceful stop (not a
+  # max_iterations failure). Plan only — implements nothing.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: plan
+    depends_on: [seed]
+    idle_timeout: 600000
+    loop:
+      command: ralph-plan
+      until: PLAN_STABLE
+      max_iterations: 3
+      fresh_context: true
+      until_bash: bun run .archon/scripts/ralph-plan-cap.ts "$ARTIFACTS_DIR"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 3: SIZE BUILD BUDGET — count incomplete items + 20% headroom,
+  # exactly like ralph's calculate_build_iterations: ceil(count * 1.2).
+  # Written to the artifacts dir for the build loop's until_bash to read.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: plan-count
+    depends_on: [plan]
+    script: ralph-plan-count
+    runtime: bun
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 4: BUILD LOOP — the Ralph loop. One plan item per FRESH iteration.
+  # Completes when no incomplete items remain OR the budget is spent
+  # (until_bash). max_iterations is only a hard safety ceiling above any
+  # realistic budget — the budget is the real bound.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: build
+    depends_on: [plan-count]
+    idle_timeout: 600000
+    loop:
+      command: ralph-build
+      until: PLAN_COMPLETE
+      max_iterations: 100
+      fresh_context: true
+      until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 5: REPORT — factual summary of the run (read-only). Runs BEFORE
+  # archive so the artifacts are still in place.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: report
+    depends_on: [build]
+    model: sonnet
+    command: ralph-report
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 6: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
+  # exactly like `ralph archive`. Runs last.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: archive
+    depends_on: [report]
+    script: ralph-archive
+    runtime: bun
