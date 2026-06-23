@@ -21,14 +21,16 @@ It drops a self-contained `.archon/` workflow into your repo that:
 
 ```bash
 cd your-project
-bunx archon-ralph init
+bunx github:marc0der/archon-ralph init
 ```
+
+> Once published to npm, the shorter `bunx archon-ralph init` will also work.
 
 This copies the workflow into `your-project/.archon/`, skipping any files that
 already exist. Re-run with `--force` to overwrite:
 
 ```bash
-bunx archon-ralph init --force
+bunx github:marc0der/archon-ralph init --force
 ```
 
 Options:
