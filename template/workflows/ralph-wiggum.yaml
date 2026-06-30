@@ -124,7 +124,23 @@ nodes:
     runtime: bun
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 7: REPORT — factual summary of the run (read-only). Runs BEFORE
+  # NODE 7: BUILD-FIX LOOP — close the gaps review appended. Identical loop
+  # to BUILD (reuses ralph-build + ralph-build-cap), bounded by the budget
+  # review-count sized. No gaps → budget 1 → a single no-op iteration that
+  # sees a complete plan and exits immediately.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: build-fix
+    depends_on: [review-count]
+    idle_timeout: 600000
+    loop:
+      command: ralph-build
+      until: PLAN_COMPLETE
+      max_iterations: 100
+      fresh_context: true
+      until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 8: REPORT — factual summary of the run (read-only). Runs BEFORE
   # archive so the artifacts are still in place.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
@@ -133,7 +149,7 @@ nodes:
     command: ralph-report
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 8: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
+  # NODE 9: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
   # exactly like `ralph archive`. Runs last.
   # ═══════════════════════════════════════════════════════════════════════
   - id: archive
