@@ -1,10 +1,10 @@
 ---
-description: Ralph Wiggum run report — read-only factual summary of seed/plan/build/archive outputs.
+description: Ralph Wiggum run report — read-only factual summary of the plan/build/review/PR outputs.
 ---
 
 # Ralph run — completion report
 
-The Ralph build loop has finished. Produce a concise, factual report.
+The Ralph loop has finished — built, reviewed, fixed, and a PR raised. Produce a concise, factual report.
 
 **Goal:** $ARGUMENTS
 
@@ -16,9 +16,17 @@ $plan-count.output
 
 $build.output
 
+**Review outcome:**
+
+$review.output
+
+**Pull request:**
+
+$raise-pr.output
+
 ## Steps
 
-1. `cat IMPLEMENTATION_PLAN.md` — note which items are complete vs still `- [ ]`.
+1. `cat IMPLEMENTATION_PLAN.md` — note which items are complete vs still `- [ ]`, including the `## Review gaps` section.
 2. `git log --oneline -20` — commits produced during this run.
 3. `tail -n 60 PROGRESS.md` — latest learnings and gotchas.
 
@@ -34,6 +42,9 @@ Branch:  {current branch}
 Plan:    {N complete} / {M total} items   (budget was {budget})
 Remaining items:
 - {each still-incomplete item, or "none"}
+
+Review:  {gaps found and closed, or "spec fully satisfied"}
+PR:      {pull request URL}
 
 Commits this run:
 {git log output}

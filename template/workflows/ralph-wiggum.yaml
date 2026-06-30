@@ -3,13 +3,13 @@ description: |
   Use when: User wants to run the Ralph Wiggum autonomous plan/build loop
             (a port of marc0der/ralph) on this project.
   Triggers: "ralph wiggum", "run ralph", "ralph loop", "ralph plan/build".
-  Does: Seeds loop artifacts (like `ralph init`), runs a PLAN loop (up to 3
-        passes) that writes IMPLEMENTATION_PLAN.md from specs/ + the codebase,
-        sizes a BUILD budget (incomplete items + 20% headroom, like ralph),
-        then runs BUILD iterations with a FRESH context each — implementing one
-        plan item, testing, committing, pushing — until the plan is exhausted
-        or the budget is spent. Reports, then archives the artifacts to
-        .ralph/<timestamp>/ (like `ralph archive`).
+  Does: Checks prerequisites (must be on a pushed feature branch), seeds loop
+        artifacts, runs a PLAN loop (up to 3 passes) writing IMPLEMENTATION_PLAN.md
+        from specs/ + the codebase, sizes a BUILD budget (incomplete items + 20%
+        headroom), runs BUILD iterations with a FRESH context each (implement one
+        plan item, test, commit, push), then REVIEWS the result against specs/ and
+        runs a BUILD-FIX loop to close any gaps. Finally raises a PR for the branch
+        (gh), reports, and archives the artifacts to .ralph/<timestamp>/.
   NOT for: PR reviews, one-off fixes, or PRD/story-driven work (use archon-ralph-dag).
 
 # REQUIRES the marc0der/Archon fork (https://github.com/marc0der/Archon): the
@@ -154,7 +154,7 @@ nodes:
   # archive so the artifacts are still in place.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
-    depends_on: [build]
+    depends_on: [raise-pr]
     model: sonnet
     command: ralph-report
 
