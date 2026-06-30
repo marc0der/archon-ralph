@@ -21,7 +21,7 @@ $ARGUMENTS
 Print a clear reason and exit WITHOUT creating or editing a PR if either holds:
 
 1. **Nothing to ship** — `git rev-list --count "$BASE_BRANCH"..HEAD` is `0`. No commits exist to propose.
-2. **Incomplete work** — `IMPLEMENTATION_PLAN.md` still has incomplete items: `grep -c '^- \[ \]' IMPLEMENTATION_PLAN.md` is greater than `0`. Refuse to raise a partial-work PR; report how many remain.
+2. **Incomplete work** — `IMPLEMENTATION_PLAN.md` still has incomplete items. Count them with `grep -c '^- \[ \]' IMPLEMENTATION_PLAN.md 2>/dev/null || echo 0` and read the **number it prints**, not the exit code (`grep -c` exits non-zero when the count is `0`, and the `|| echo 0` also covers a missing file). If that number is greater than `0`, refuse to raise a partial-work PR and report how many remain.
 
 When a guard trips, let the node fail — do not open a PR.
 
