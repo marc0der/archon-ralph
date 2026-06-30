@@ -6,17 +6,21 @@ Scaffold the **Ralph Wiggum** autonomous plan/build loop — a port of
 
 It drops a self-contained `.archon/` workflow into your repo that:
 
-1. **Seeds** loop artifacts (`IMPLEMENTATION_PLAN.md`, `PROGRESS.md`) from templates.
-2. Runs a **PLAN** loop (≤ 3 fresh passes) that writes `IMPLEMENTATION_PLAN.md` from `specs/` + the codebase.
-3. Sizes a **BUILD budget** (incomplete items + 20 % headroom).
-4. Runs **BUILD** iterations — each with a *fresh* context — implementing one plan item, testing, committing, pushing — until the plan is exhausted or the budget is spent.
-5. **Reports** the run, then **archives** the artifacts to `.ralph/<timestamp>/`.
+1. **Prechecks** prerequisites — fails fast unless you're on a *pushed feature branch* (the workflow does no git surgery; you own branch + spec).
+2. **Seeds** loop artifacts (`IMPLEMENTATION_PLAN.md`, `PROGRESS.md`) from templates.
+3. Runs a **PLAN** loop (≤ 3 fresh passes) that writes `IMPLEMENTATION_PLAN.md` from `specs/` + the codebase.
+4. Sizes a **BUILD budget** (incomplete items + 20 % headroom) and runs **BUILD** iterations — each with a *fresh* context — implementing one plan item, testing, committing, pushing — until the plan is exhausted or the budget is spent.
+5. **Reviews** the result against `specs/` (Opus/ultrathink), appends any gaps to the plan, and runs a **BUILD-FIX** loop to close them.
+6. **Raises a PR** for the feature branch via `gh` (idempotent — updates an existing PR).
+7. **Reports** the run, then **archives** the artifacts to `.ralph/<timestamp>/`.
 
 ## Requirements
 
 - **[marc0der/Archon](https://github.com/marc0der/Archon)** — this workflow needs
   the fork, not upstream Archon (see below). Build/install from its `dev` branch.
 - [Bun](https://bun.sh) (the loop-control scripts run via `bun run`)
+- [GitHub CLI (`gh`)](https://cli.github.com), authenticated (`gh auth login`) — the
+  raise-PR phase opens/updates the pull request through it.
 
 ### Why the fork?
 
@@ -60,13 +64,25 @@ Options:
 
 ## Run the loop
 
+The workflow does **no git surgery** — branch creation and committing the spec are
+yours to do first. Before running:
+
+1. Update your base branch (e.g. `main`).
+2. Create a feature branch: `git checkout -b feature/<name>`.
+3. Commit your spec on it: `git add specs/<name>.md && git commit`.
+4. Push it: `git push -u origin HEAD`.
+
+Then run on that branch with `--no-worktree` (the loop operates on your real
+feature branch, so a throwaway worktree is wrong here). The goal is free text that
+names the spec:
+
 ```bash
-archon workflow run ralph-wiggum -g "your goal here"
+archon workflow run ralph-wiggum --cwd <repo> --no-worktree \
+  "Implement the X feature described in specs/x.md"
 ```
 
-By default Archon runs the workflow in a fresh git worktree off your base
-branch. To run against your current checkout instead, add `--no-worktree`
-(or `--from <branch>` to base the worktree elsewhere).
+The `precheck` node fails fast with guidance if you're not on a pushed feature
+branch, so a misconfigured run stops immediately rather than midway through.
 
 ## What gets installed
 
@@ -75,14 +91,17 @@ branch. To run against your current checkout instead, add `--no-worktree`
 ├── config.yaml                     # project-scoped Archon config (stub)
 ├── package.json / tsconfig.json    # Bun project for the control scripts
 ├── workflows/ralph-wiggum.yaml     # the workflow definition
-├── commands/                       # plan / build / report prompts
+├── commands/                       # plan / build / review / pr / report prompts
 │   ├── ralph-plan.md
 │   ├── ralph-build.md
+│   ├── ralph-review.md
+│   ├── ralph-pr.md
 │   └── ralph-report.md
 ├── ralph/templates/                # user-editable artifact templates
 │   ├── IMPLEMENTATION_PLAN.md
 │   └── PROGRESS.md
 └── scripts/                        # loop-control scripts (Node built-ins only)
+    ├── ralph-precheck.ts
     ├── ralph-seed.ts
     ├── ralph-plan-cap.ts
     ├── ralph-plan-count.ts
