@@ -101,7 +101,30 @@ nodes:
       until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 5: REPORT — factual summary of the run (read-only). Runs BEFORE
+  # NODE 5: REVIEW — one-shot Opus/ultrathink pass. Scrutinise the built
+  # implementation against specs/ and APPEND any gaps as `- [ ]` items to
+  # IMPLEMENTATION_PLAN.md (append-only ledger). Implements nothing; the
+  # build-fix loop closes whatever it finds.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: review
+    depends_on: [build]
+    idle_timeout: 600000
+    command: ralph-review
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 6: REVIEW-COUNT — re-size the build budget from the gaps review
+  # appended. Reuses ralph-plan-count, which also RESETS build-iter.txt to
+  # 0 (and build-budget.txt) in the artifacts dir — that reset is what lets
+  # build-fix reuse ralph-build-cap with a clean counter. Zero gaps → budget
+  # 1 → build-fix no-ops once.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: review-count
+    depends_on: [review]
+    script: ralph-plan-count
+    runtime: bun
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 7: REPORT — factual summary of the run (read-only). Runs BEFORE
   # archive so the artifacts are still in place.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
@@ -110,7 +133,7 @@ nodes:
     command: ralph-report
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 6: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
+  # NODE 8: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
   # exactly like `ralph archive`. Runs last.
   # ═══════════════════════════════════════════════════════════════════════
   - id: archive
