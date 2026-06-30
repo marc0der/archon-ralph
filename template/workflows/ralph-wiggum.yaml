@@ -140,7 +140,17 @@ nodes:
       until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 8: REPORT — factual summary of the run (read-only). Runs BEFORE
+  # NODE 8: RAISE-PR — open (or idempotently update) the pull request for
+  # the feature branch via the `gh` CLI. Base is $BASE_BRANCH, head is the
+  # current branch. Fails fast if there are no commits to ship or the plan
+  # still has incomplete `- [ ]` items (no partial-work PRs).
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: raise-pr
+    depends_on: [build-fix]
+    command: ralph-pr
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 9: REPORT — factual summary of the run (read-only). Runs BEFORE
   # archive so the artifacts are still in place.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
@@ -149,7 +159,7 @@ nodes:
     command: ralph-report
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 9: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
+  # NODE 10: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
   # exactly like `ralph archive`. Runs last.
   # ═══════════════════════════════════════════════════════════════════════
   - id: archive
