@@ -17,7 +17,7 @@ $ARGUMENTS
 
 ## Phase 1: Understand
 
-Gather context by reading these sources. Use up to 50 parallel **Sonnet** subagents for search and read operations.
+Gather context by reading these sources. Use parallel **Sonnet** subagents for search and read operations — as many as the work warrants.
 
 - **Operational guardrails** — read `AGENTS.md` or `CLAUDE.md` (if present) for build commands, conventions, and project rules
 - **Specifications** — read everything in `specs/`
