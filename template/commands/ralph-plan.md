@@ -43,6 +43,7 @@ Look for:
 Create or update `IMPLEMENTATION_PLAN.md`, following the entry format documented in its `## Entry Format` header:
 
 - Prioritised bullet list of items yet to be implemented
+- Keep items **fine-grained** — the build loop implements one item per iteration, so each must be completable and verifiable in a single iteration; split anything larger into ordered sub-items
 - Mark items as complete (`- [x]`) or incomplete (`- [ ]`)
 - **Never delete completed items** — the plan is an append-only ledger that preserves what has already shipped
 - If you authored new specs, include tasks to implement them
