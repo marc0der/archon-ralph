@@ -16,27 +16,45 @@ description: |
 # PLAN/BUILD loop nodes resolve `loop.command:` to extracted command files
 # (commands/ralph-*.md), which upstream Archon does not yet support.
 #
-# The {{GOAL}} from `ralph -g` maps to $ARGUMENTS.
+# The goal from `archon workflow run` maps to $ARGUMENTS — free text that names
+# the spec, e.g. "Implement the X feature described in specs/x.md".
 #
 # IMPORTANT — model is set at the WORKFLOW level on purpose: loop nodes ignore a
 # per-node `model:` and always use the workflow-level model. Drop to `sonnet`
 # for faster/cheaper iterations; the prompts already delegate heavy reasoning to
 # Opus subagents.
 #
-# IMPORTANT — isolation: `archon workflow run` creates a worktree off the base
-# branch (main) by DEFAULT. To run on your CURRENT checkout (e.g. a feature
-# branch under test), invoke with `--no-worktree`, or `--from <branch>` to base
-# the worktree elsewhere.
+# IMPORTANT — prerequisites & isolation: this workflow does NO git surgery.
+# Branch creation and committing the spec are the HUMAN's responsibility. Before
+# running, you must: (1) update the base branch, (2) create a feature branch,
+# (3) commit the spec on it, (4) push it (set upstream). The `precheck` node
+# fails fast if these aren't met. Because the loop operates on your real feature
+# branch — not a throwaway worktree — you MUST invoke with `--no-worktree` (and
+# `--cwd <repo>` when running from elsewhere):
+#
+#   archon workflow run ralph-wiggum --cwd <repo> --no-worktree \
+#     "Implement the X feature described in specs/x.md"
 provider: claude
 model: opus
 
 nodes:
+  # ═══════════════════════════════════════════════════════════════════════
+  # NODE 0: PRECHECK — fail fast unless the repo is ready. The workflow does
+  # NO git surgery, so the human must already be on a pushed feature branch
+  # (not the base branch) with the spec committed. Guards: on a named
+  # feature branch ≠ $BASE_BRANCH, and that branch has an upstream.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: precheck
+    script: ralph-precheck
+    runtime: bun
+
   # ═══════════════════════════════════════════════════════════════════════
   # NODE 1: SEED — scaffold the loop artifacts from templates (mirrors
   # `ralph init`). Templates live in .archon/ralph/templates/ (auto-copied
   # into worktrees) and are user-editable, exactly like ralph's templates/.
   # ═══════════════════════════════════════════════════════════════════════
   - id: seed
+    depends_on: [precheck]
     script: ralph-seed
     runtime: bun
 
