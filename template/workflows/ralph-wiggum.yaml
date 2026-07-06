@@ -69,6 +69,7 @@ nodes:
     idle_timeout: 600000
     loop:
       command: ralph-plan
+      model: fable
       until: PLAN_STABLE
       max_iterations: 3
       fresh_context: true
@@ -95,6 +96,7 @@ nodes:
     idle_timeout: 600000
     loop:
       command: ralph-build
+      model: sonnet
       until: PLAN_COMPLETE
       max_iterations: 100
       fresh_context: true
@@ -110,6 +112,7 @@ nodes:
     depends_on: [build]
     idle_timeout: 600000
     command: ralph-review
+    model: fable
 
   # ═══════════════════════════════════════════════════════════════════════
   # NODE 6: REVIEW-COUNT — re-size the build budget from the gaps review
@@ -134,6 +137,7 @@ nodes:
     idle_timeout: 600000
     loop:
       command: ralph-build
+      model: opus
       until: PLAN_COMPLETE
       max_iterations: 100
       fresh_context: true
