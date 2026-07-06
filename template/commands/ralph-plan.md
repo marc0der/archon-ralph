@@ -46,6 +46,7 @@ Create or update `IMPLEMENTATION_PLAN.md`, following the entry format documented
 - Mark items as complete (`- [x]`) or incomplete (`- [ ]`)
 - **Never delete completed items** — the plan is an append-only ledger that preserves what has already shipped
 - If you authored new specs, include tasks to implement them
+- **Items only** — write formatted entries and nothing else; no preamble, notes, or narration. Your reasoning goes in your response to the loop, not the file
 
 ---
 
@@ -54,6 +55,7 @@ Create or update `IMPLEMENTATION_PLAN.md`, following the entry format documented
 - **Plan only. Do NOT implement anything.**
 - Never assume functionality is missing — confirm with code search first
 - If you create a new spec, document the plan to implement it in `IMPLEMENTATION_PLAN.md`
+- **`IMPLEMENTATION_PLAN.md` holds only formatted items** — never preamble, prose, or scratch notes
 
 ---
 

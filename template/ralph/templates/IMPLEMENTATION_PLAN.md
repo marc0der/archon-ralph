@@ -1,6 +1,6 @@
 # Implementation Plan
 
-**Prioritised list of work items. Order is priority — the build agent picks the top incomplete item.**
+**Prioritised list of work items. Order is priority — the build agent picks the top incomplete item. Formatted items only — no preamble, prose, or notes.**
 
 ## Entry Format
 
