@@ -1,173 +1,191 @@
 name: ralph-wiggum
 description: |
-  Use when: User wants to run the Ralph Wiggum autonomous plan/build loop
-            (a port of marc0der/ralph) on this project.
+  Use when: User wants to run the Ralph Wiggum autonomous plan/build/review
+            lifecycle (a port of marc0der/ralph) on this project.
   Triggers: "ralph wiggum", "run ralph", "ralph loop", "ralph plan/build".
-  Does: Checks prerequisites (must be on a pushed feature branch), seeds loop
-        artifacts, runs a PLAN loop (up to 3 passes) writing IMPLEMENTATION_PLAN.md
-        from specs/ + the codebase, sizes a BUILD budget (incomplete items + 20%
-        headroom), runs BUILD iterations with a FRESH context each (implement one
-        plan item, test, commit, push), then REVIEWS the result against specs/ and
-        runs a BUILD-FIX loop to close any gaps. Finally raises a PR for the branch
-        (gh), reports, and archives the artifacts to .ralph/<timestamp>/.
-  NOT for: PR reviews, one-off fixes, or PRD/story-driven work (use archon-ralph-dag).
+  Does: Archives the previous cycle's artifacts to .ralph/<timestamp>/, seeds
+        IMPLEMENTATION_PLAN.md and PROGRESS.md from the templates, runs the
+        PLAN loop to convergence, then repeats build-to-exhaustion and review
+        as one cycle — each BUILD iteration implements one plan item with a
+        fresh context, tests, commits and pushes; each REVIEW iteration audits
+        the shipped items and files findings as new plan items — cycling again
+        while open items remain, and stopping when a review pass files nothing
+        or the cycle cap is reached. Ends with a factual lifecycle report.
+  NOT for: PR reviews, one-off fixes, or PRD/story-driven work.
 
-# REQUIRES the marc0der/Archon fork (https://github.com/marc0der/Archon): the
-# PLAN/BUILD loop nodes resolve `loop.command:` to extracted command files
-# (commands/ralph-*.md), which upstream Archon does not yet support.
+# The goal is the positional message: `archon workflow run ralph-wiggum "<goal>"`.
+# It reaches the prompts as $ARGUMENTS and `ralph-precondition` requires it.
 #
-# The goal from `archon workflow run` maps to $ARGUMENTS — free text that names
-# the spec, e.g. "Implement the X feature described in specs/x.md".
+# Model is set at the WORKFLOW level by decision: one model drives every phase,
+# and the prompts delegate heavy reasoning to subagents rather than to a second
+# model. Drop to `sonnet` for faster, cheaper iterations.
 #
-# IMPORTANT — model is set at the WORKFLOW level on purpose: loop nodes ignore a
-# per-node `model:` and always use the workflow-level model. Drop to `sonnet`
-# for faster/cheaper iterations; the prompts already delegate heavy reasoning to
-# Opus subagents.
-#
-# IMPORTANT — prerequisites & isolation: this workflow does NO git surgery.
-# Branch creation and committing the spec are the HUMAN's responsibility. Before
-# running, you must: (1) update the base branch, (2) create a feature branch,
-# (3) commit the spec on it, (4) push it (set upstream). The `precheck` node
-# fails fast if these aren't met. Because the loop operates on your real feature
-# branch — not a throwaway worktree — you MUST invoke with `--no-worktree` (and
-# `--cwd <repo>` when running from elsewhere):
-#
-#   archon workflow run ralph-wiggum --cwd <repo> --no-worktree \
-#     "Implement the X feature described in specs/x.md"
+# Isolation: the run acts on the live checkout, like ralph. Commit and branch
+# state is the operator's, and nested repositories are reached where they sit.
 provider: claude
 model: opus
 
+worktree:
+  enabled: false
+
+# The boundary for a run Archon executes with permissions bypassed. Writes stay
+# allowed outside the denials below, because a nested repository may sit
+# anywhere; extend the domain allowlist with your own git host and registries.
+sandbox:
+  enabled: true
+  autoAllowBashIfSandboxed: true
+  filesystem:
+    denyWrite: ["~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gh", "~/.archon/config.yaml"]
+  network:
+    allowedDomains: ["github.com", "api.github.com", "registry.npmjs.org", "bun.sh"]
+
+inputs:
+  skip_push:
+    default: false
+    description: Do not push the workspace after a build iteration.
+  cycle_cap:
+    default: 3
+    description: Maximum build-review cycles before the run stops.
+
 nodes:
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 0: PRECHECK — fail fast unless the repo is ready. The workflow does
-  # NO git surgery, so the human must already be on a pushed feature branch
-  # (not the base branch) with the spec committed. Guards: on a named
-  # feature branch ≠ $BASE_BRANCH, and that branch has an upstream.
+  # PRECONDITION — fail fast on a goalless run, a detached HEAD, a
+  # non-repository or a missing tool. The only node with no always_run: it
+  # writes nothing, so a resume may reuse its verdict.
   # ═══════════════════════════════════════════════════════════════════════
-  - id: precheck
-    script: ralph-precheck
+  - id: precondition
+    script: ralph-precondition
     runtime: bun
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 1: SEED — scaffold the loop artifacts from templates (mirrors
-  # `ralph init`). Templates live in .archon/ralph/templates/ (auto-copied
-  # into worktrees) and are user-editable, exactly like ralph's templates/.
+  # SEED — archive the previous cycle, scaffold the artifacts from
+  # .archon/ralph/templates/, ignore them, and record the run's settings and
+  # starting repository state (`ralph archive` + `ralph init`).
   # ═══════════════════════════════════════════════════════════════════════
   - id: seed
-    depends_on: [precheck]
+    depends_on: [precondition]
     script: ralph-seed
     runtime: bun
+    always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 2: PLAN LOOP — analyse specs + code, write IMPLEMENTATION_PLAN.md.
-  # Up to 3 fresh passes (ralph PLAN_DEFAULT_CAP=3). Exits early when stable.
-  # The counter in until_bash makes the 3rd pass a graceful stop (not a
-  # max_iterations failure). Plan only — implements nothing.
+  # PLAN — analyse specs + code, write IMPLEMENTATION_PLAN.md. The snapshot
+  # records the plan fingerprint the cap compares against; the cap stops on
+  # an unchanged fingerprint or at ralph's cap of 6 passes, both graceful.
+  # max_iterations is a safety ceiling above the cap, never the bound.
   # ═══════════════════════════════════════════════════════════════════════
-  - id: plan
+  - id: plan-snapshot
     depends_on: [seed]
+    script: ralph-snapshot
+    runtime: bun
+    with: { mode: plan }
+    always_run: true
+
+  - id: plan
+    depends_on: [plan-snapshot]
     idle_timeout: 600000
     loop:
       command: ralph-plan
-      model: fable
-      until: PLAN_STABLE
-      max_iterations: 3
+      max_iterations: 7
       fresh_context: true
       until_bash: bun run .archon/scripts/ralph-plan-cap.ts "$ARTIFACTS_DIR"
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 3: SIZE BUILD BUDGET — count incomplete items + 20% headroom,
-  # exactly like ralph's calculate_build_iterations: ceil(count * 1.2).
-  # Written to the artifacts dir for the build loop's until_bash to read.
+  # CYCLE — one iteration is one ralph cycle: build to exhaustion, then
+  # review. The group completes when the plan holds no open items or the
+  # cycle cap is reached. maxBudgetUsd is the money bound; max_iterations is
+  # a ceiling cycle_cap must stay below.
   # ═══════════════════════════════════════════════════════════════════════
-  - id: plan-count
+  - id: cycle
     depends_on: [plan]
-    script: ralph-plan-count
-    runtime: bun
+    maxBudgetUsd: 50
+    loop_group:
+      max_iterations: 20
+      until_bash: bun run .archon/scripts/ralph-cycle-cap.ts "$ARTIFACTS_DIR"
+      nodes:
+        # ─────────────────────────────────────────────────────────────────
+        # BUILD — one plan item per fresh iteration. Guarded on open items,
+        # read from the plan as it stands at the start of this cycle. The
+        # cap stops on an exhausted plan, two iterations with no repository
+        # change, or the spent budget; the guard fails the run on a marker
+        # the cap wrote (a rejected push).
+        # ─────────────────────────────────────────────────────────────────
+        - id: counts-pre-build
+          script: ralph-counts
+          runtime: bun
+          always_run: true
+
+        - id: build-snapshot
+          depends_on: [counts-pre-build]
+          when: "$counts-pre-build.output.open > 0"
+          script: ralph-snapshot
+          runtime: bun
+          with: { mode: build }
+          always_run: true
+
+        - id: build
+          depends_on: [build-snapshot]
+          idle_timeout: 600000
+          loop:
+            command: ralph-build
+            max_iterations: 200
+            fresh_context: true
+            until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
+
+        - id: build-guard
+          depends_on: [build]
+          trigger_rule: all_done
+          script: ralph-guard
+          runtime: bun
+          always_run: true
+
+        # ─────────────────────────────────────────────────────────────────
+        # REVIEW — audit the shipped items and file findings as new plan
+        # items. Guarded on a plan with nothing open and something shipped,
+        # so a build that stopped short leaves the audit to the next cycle.
+        # The cap aborts a pass that un-ticks an item; the guard fails on it.
+        # The join rule on the guards is what lets a node run after a loop
+        # upstream was skipped as well as after one that ran.
+        # ─────────────────────────────────────────────────────────────────
+        - id: counts-pre-review
+          depends_on: [build-guard]
+          trigger_rule: all_done
+          script: ralph-counts
+          runtime: bun
+          always_run: true
+
+        - id: review-snapshot
+          depends_on: [counts-pre-review]
+          when: "$counts-pre-review.output.open == 0 && $counts-pre-review.output.shipped > 0"
+          script: ralph-snapshot
+          runtime: bun
+          with: { mode: review }
+          always_run: true
+
+        - id: review
+          depends_on: [review-snapshot]
+          idle_timeout: 600000
+          loop:
+            command: ralph-review
+            max_iterations: 7
+            fresh_context: true
+            until_bash: bun run .archon/scripts/ralph-review-cap.ts "$ARTIFACTS_DIR"
+
+        - id: review-guard
+          depends_on: [review]
+          trigger_rule: all_done
+          script: ralph-guard
+          runtime: bun
+          always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
-  # NODE 4: BUILD LOOP — the Ralph loop. One plan item per FRESH iteration.
-  # Completes when no incomplete items remain OR the budget is spent
-  # (until_bash). max_iterations is only a hard safety ceiling above any
-  # realistic budget — the budget is the real bound.
-  # ═══════════════════════════════════════════════════════════════════════
-  - id: build
-    depends_on: [plan-count]
-    idle_timeout: 600000
-    loop:
-      command: ralph-build
-      model: sonnet
-      until: PLAN_COMPLETE
-      max_iterations: 100
-      fresh_context: true
-      until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # NODE 5: REVIEW — one-shot Opus/ultrathink pass. Scrutinise the built
-  # implementation against specs/ and APPEND any gaps as `- [ ]` items to
-  # IMPLEMENTATION_PLAN.md (append-only ledger). Implements nothing; the
-  # build-fix loop closes whatever it finds.
-  # ═══════════════════════════════════════════════════════════════════════
-  - id: review
-    depends_on: [build]
-    idle_timeout: 600000
-    command: ralph-review
-    model: fable
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # NODE 6: REVIEW-COUNT — re-size the build budget from the gaps review
-  # appended. Reuses ralph-plan-count, which also RESETS build-iter.txt to
-  # 0 (and build-budget.txt) in the artifacts dir — that reset is what lets
-  # build-fix reuse ralph-build-cap with a clean counter. Zero gaps → budget
-  # 1 → build-fix no-ops once.
-  # ═══════════════════════════════════════════════════════════════════════
-  - id: review-count
-    depends_on: [review]
-    script: ralph-plan-count
-    runtime: bun
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # NODE 7: BUILD-FIX LOOP — close the gaps review appended. Identical loop
-  # to BUILD (reuses ralph-build + ralph-build-cap), bounded by the budget
-  # review-count sized. No gaps → budget 1 → a single no-op iteration that
-  # sees a complete plan and exits immediately.
-  # ═══════════════════════════════════════════════════════════════════════
-  - id: build-fix
-    depends_on: [review-count]
-    idle_timeout: 600000
-    loop:
-      command: ralph-build
-      model: opus
-      until: PLAN_COMPLETE
-      max_iterations: 100
-      fresh_context: true
-      until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # NODE 8: RAISE-PR — open (or idempotently update) the pull request for
-  # the feature branch via the `gh` CLI. Base is $BASE_BRANCH, head is the
-  # current branch. Fails fast if there are no commits to ship or the plan
-  # still has incomplete `- [ ]` items (no partial-work PRs).
-  # ═══════════════════════════════════════════════════════════════════════
-  - id: raise-pr
-    depends_on: [build-fix]
-    idle_timeout: 600000
-    command: ralph-pr
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # NODE 9: REPORT — factual summary of the run (read-only). Runs BEFORE
-  # archive so the artifacts are still in place.
+  # REPORT — the factual lifecycle summary, from outcome.log, abort.txt,
+  # run-start.txt and the plan. Read-only, and exits 0 even after an abort:
+  # the guard already failed the run, and the summary is the product.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
-    depends_on: [raise-pr]
-    model: sonnet
-    command: ralph-report
-
-  # ═══════════════════════════════════════════════════════════════════════
-  # NODE 10: ARCHIVE — move the loop artifacts to .ralph/<timestamp>/,
-  # exactly like `ralph archive`. Runs last.
-  # ═══════════════════════════════════════════════════════════════════════
-  - id: archive
-    depends_on: [report]
-    script: ralph-archive
+    depends_on: [cycle]
+    trigger_rule: all_done
+    script: ralph-report
     runtime: bun
+    always_run: true
