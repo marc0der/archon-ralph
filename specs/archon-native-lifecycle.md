@@ -360,9 +360,11 @@ root as the working directory; the `until_bash` scripts receive the artifacts di
    `false` and `3`). The `until_bash` scripts cannot see `INPUTS_*`, so this file is how the inputs
    reach them.
 6. Record `run-start.txt`: the `repoState()` listing at the start of the run, for the report.
-7. Print **one JSON object and nothing else** to stdout:
+7. Append `seed: archived previous cycle to <dir>/`, or `seed: nothing to archive`, to
+   `outcome.log`. The report reads its rows from that file alone, so every phase writes one.
+8. Print **one JSON object and nothing else** to stdout:
    `{"root": "<absolute checkout root>", "archived": "<dir>" | null, "branch": "<name>"}`.
-   The prompts interpolate `$seed.output.root` as the workspace anchor (§6).
+   `root` is the record of where the run acted; the prompts anchor on `pwd` instead (§6).
 
 **`ralph-snapshot`** (exec node, `always_run`, `with: {mode: plan|build|review}` read from
 `INPUTS_MODE`). Writes the pre-loop state the cap script compares against:
@@ -403,7 +405,7 @@ when `IMPLEMENTATION_PLAN.md` or `PROGRESS.md` is missing.
      same to `outcome.log`, **exit 0**. The loop completes and `build-guard` fails the run (§4.3).
 5. `open = countItems('[ ]')`. Complete (exit 0) on the first of: `open == 0` (`plan exhausted`),
    `noops >= 2` (`no changes for 2 consecutive iterations`), `n >= budget` (`budget of B spent`).
-   Each appends its reason to `outcome.log`. Else exit 1.
+   Each appends `build: n iterations, <reason>` to `outcome.log`. Else exit 1.
 
 The push happens before the exit decision so that the last iteration's commits are pushed, as in
 ralph where the push block precedes the early-exit check.
@@ -452,11 +454,21 @@ Repositories that moved: . (4 commits), source/svc (7 commits)
 Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; previous cycle under .ralph/<timestamp>/
 ```
 
-A phase that did not run is reported `skipped — <reason>` with the reason derived from the counts
-that gated it (`no open items`, `no shipped items to audit`, `N open items remain`). An abort is
-reported `failed — <abort.txt first line>` and the report exits 0: it is a report, the guard already
-failed the run. Per-repository commit counts come from `git -C <repo> rev-list --count
-<start>..HEAD` where both shas exist, else the repository is listed as `moved`.
+The phase rows come from `outcome.log` alone. The report splits the file into cycles on its `cycle
+N:` lines: the lines before the first `cycle` line are `seed` and `plan`, and the lines after a
+`cycle` line belong to the next cycle. A cycle block with no `build:` line reports `build skipped —
+no open items`. A cycle block with no `review:` line reports `review skipped — N open items remain`
+when its `cycle N:` line names open items, and `review skipped — no shipped items to audit` when
+that line says `clean`. The `filed F findings` clause on a `review` row is the open count the same
+`cycle N:` line names, and `0` when that line says `clean`. An abort is reported `failed —
+<abort.txt first line>` and the report exits 0: it is a report, the guard already failed the run.
+Per-repository commit counts come from `git -C <repo> rev-list --count <start>..HEAD` where both
+shas exist, else the repository is listed as `moved`.
+
+**Decision, 2026-09-17.** `ralph-snapshot` resets every counter file at the start of each cycle, so
+the counters hold the last cycle's numbers only. Every per-cycle figure the report prints therefore
+has to be in `outcome.log`, which is why `ralph-build-cap` writes its iteration count into the line
+and `ralph-seed` writes a row of its own.
 
 ### 4.3 Why a marker and a guard
 
@@ -481,18 +493,27 @@ which case it finds no marker and exits 0.
 ralph's `prompts/plan.md`, `prompts/build.md` and `prompts/review.md` at `36e8c8b` by these
 substitutions and no others:
 
+**Decision, 2026-09-17.** Ralph's prompts and the plan template of §5 come from a sibling
+checkout at `../ralph`, which carries `marc0der/ralph` as its `upstream` remote. Fetch `upstream`
+there when `36e8c8b` does not resolve. The sync script of §11 replaces that manual step.
+
 1. **Frontmatter.** Each file keeps a YAML frontmatter with `description:` (one line, present
    tense, naming the loop) and, for `ralph-plan.md` only, `argument-hint: "<goal>"`. Add
    `source: marc0der/ralph@36e8c8b prompts/<name>.md` so the next sync knows the baseline.
 2. **Goal.** In `ralph-plan.md`, `{{GOAL}}` becomes `$ARGUMENTS`. `ralph-build.md` and
    `ralph-review.md` carry no goal, exactly as ralph's do; the current `(If the goal above is
    blank, ...)` paragraphs are gone with the `## Goal` blocks.
-3. **Workspace anchor.** Every `{{WORKSPACE}}` becomes `$seed.output.root`. The first plan item
-   that touches a prompt verifies, with `archon workflow run ralph-wiggum --dry-run` where the CLI
-   is available or by reading Archon's `loadCommandPrompt` call in `dag-executor.ts`, that a
-   loop's command prompt passes through `substituteWorkflowVariables` after loading. If it does
-   not, the anchor paragraph instead reads: "The workspace root is the directory this session
-   starts in. Run `pwd` once and use that absolute path wherever this prompt names the root."
+3. **Workspace anchor.** The anchor paragraph reads: "The workspace root is the directory this
+   session starts in. Run `pwd` once and use that absolute path wherever this prompt names the
+   root." Every remaining `{{WORKSPACE}}/` prefix is dropped, leaving the artifact paths
+   root-relative.
+
+   **Decision, 2026-09-17.** The earlier text made the anchor `$seed.output.root`, conditional on
+   verifying that a loop's command prompt passes through `substituteWorkflowVariables`. Archon
+   v0.10.1 is installed here as a stripped binary and its source tree is absent, so that check
+   needs a live run to settle. The `pwd` wording is correct whether or not the substitution
+   happens, so the prompts take it unconditionally and no plan item carries the check. `ralph-seed`
+   still prints `root` in its JSON: the report and a future anchor change both want it.
 4. **Loop control.** The `## Loop control (Archon)` sections are deleted. Nothing replaces them:
    ralph's `## Convergence` sections already tell the agent that an unchanged plan is a finished
    plan and that it must not pad the file. No prompt mentions a promise token, a sentinel, or a
@@ -545,7 +566,8 @@ command to run and ralph's plan agent can write no terminal verification item. T
   `"verify": "bun run typecheck && bun test"`.
 - **Conventions**: Conventional Commits with an imperative subject of at most 50 characters,
   atomic commits, scripts import Node built-ins only, every script is importable
-  (`import.meta.main` guard), every count goes through `planItemsBody`.
+  (`import.meta.main` guard), every count goes through `planItemsBody`, and every test wraps its
+  body in `withTempRepo` from `test/helpers.ts` (§9).
 
 ## 9. Testing
 
@@ -553,6 +575,15 @@ Tests live in `test/*.test.ts` and run with `bun test`. They import from `templa
 `template/scripts/lib/`; nothing under `template/` is a test, because `bin/cli.ts` copies that tree
 into projects. Each test runs in a fresh temporary directory under `$TMPDIR` with `git init`, a
 mock `ARTIFACTS_DIR`, and `process.chdir` into it, and restores the previous directory afterwards.
+
+**Decision, 2026-09-17.** That setup is one shared helper, `test/helpers.ts`, exporting
+`withTempRepo(fn)`; no test rolls its own. Ralph keeps the same fixture in
+`test/test_helper.bash`. `withTempRepo` mints the directory, runs `git init`, sets
+`process.env.ARTIFACTS_DIR` to an `artifacts/` subdirectory, `chdir`s in, calls `fn({root,
+artifactsDir})`, and restores the previous directory and environment in a `finally`.
+
+- `withTempRepo` chdirs into a fresh directory, exposes `artifactsDir`, and restores the previous
+  working directory even when the body throws.
 
 - `planItemsBody` returns the text below `## Items`, and the whole file when the heading is absent.
 - The exemplar under `## Entry Format` counts as nothing: a freshly scaffolded plan has `open == 0`.
@@ -590,9 +621,16 @@ mock `ARTIFACTS_DIR`, and `process.chdir` into it, and restores the previous dir
   `outcome.log`, counter and marker files, and exits 0 in every case.
 - The workflow YAML parses; every `depends_on` and every `$<node>.output` reference in `when:` and
   `until_bash` names a node in scope; every `loop:` and `loop_group:` declares `until_bash` and
-  `max_iterations` and no `until:`; every node after a `when:`-guarded node in the cycle body
+  `max_iterations` and no `until:`; every node that depends on a `loop:` or `loop_group:` node
   declares `trigger_rule: all_done`; every `script:` names a file under `template/scripts/`; every
   `loop.command` names a file under `template/commands/`.
+
+  **Decision, 2026-09-17.** The earlier wording made the rule "every node after a `when:`-guarded
+  node in the cycle body". That contradicts the workflow of §3, where `build` and `review` follow a
+  guarded snapshot and declare no `trigger_rule`, because §3.1 requires a false guard to skip the
+  phase itself. The rule the workflow actually obeys is the one §4.3 states: the node after a loop
+  must run even when that loop was skipped, so it declares `trigger_rule: all_done`. The four such
+  nodes are `build-guard`, `counts-pre-review`, `review-guard` and `report`.
 - The three command files contain no `{{GOAL}}`, no `{{WORKSPACE}}`, no `<promise>`, no `PLAN_STABLE`,
   no `PLAN_COMPLETE`, no `dev-browser`, and no `50 parallel`; only `ralph-plan.md` contains
   `$ARGUMENTS`; all three contain the anchor reference.
