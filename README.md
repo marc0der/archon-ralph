@@ -1,42 +1,41 @@
 # archon-ralph
 
-Scaffold the **Ralph Wiggum** autonomous plan/build loop — a port of
+Scaffold the **Ralph Wiggum** autonomous plan/build/review lifecycle — a port of
 [marc0der/ralph](https://github.com/marc0der/ralph) to an
 [Archon](https://archon.diy) workflow — into any project.
 
 It drops a self-contained `.archon/` workflow into your repo that:
 
-1. **Prechecks** prerequisites — fails fast unless you're on a *pushed feature branch* (the workflow does no git surgery; you own branch + spec).
-2. **Seeds** loop artifacts (`IMPLEMENTATION_PLAN.md`, `PROGRESS.md`) from templates.
-3. Runs a **PLAN** loop (≤ 3 fresh passes) that writes `IMPLEMENTATION_PLAN.md` from `specs/` + the codebase.
-4. Sizes a **BUILD budget** (incomplete items + 20 % headroom) and runs **BUILD** iterations — each with a *fresh* context — implementing one plan item, testing, committing, pushing — until the plan is exhausted or the budget is spent.
-5. **Reviews** the result against `specs/` (Opus/ultrathink), appends any gaps to the plan, and runs a **BUILD-FIX** loop to close them.
-6. **Raises a PR** for the feature branch via `gh` (idempotent — updates an existing PR).
-7. **Reports** the run, then **archives** the artifacts to `.ralph/<timestamp>/`.
+1. **Seeds.** Archives the previous cycle's artifacts to `.ralph/<timestamp>/`, then scaffolds
+   `IMPLEMENTATION_PLAN.md` and `PROGRESS.md` from the templates.
+2. **Plans.** A loop that rewrites `IMPLEMENTATION_PLAN.md` from `specs/` and the codebase, each
+   pass with a *fresh* context. It stops when a pass leaves the plan and `specs/` unchanged, or
+   after 6 passes.
+3. **Cycles.** Build, then review, repeated as one `loop_group` iteration.
+   - **Build** runs when the plan holds open items. Each iteration implements one item with a
+     fresh context, tests, commits and pushes. It stops when the plan is exhausted, when two
+     iterations in a row leave every repository unmoved, or when the budget — the open count plus
+     20 % headroom — is spent.
+   - **Review** runs when build left **no** open items and at least one shipped item. Each pass
+     audits the shipped items and files findings as new open items. It stops when a pass changes
+     nothing, or after 6 passes.
+4. **Reports.** A factual summary of every phase, the plan counts and the repositories that moved.
+
+A guard that is false **skips** its phase; a skip is never a failure. Build stopping short skips
+review, and the next cycle picks the open items up.
+
+The cycle is a fixpoint. It ends when a cycle leaves zero open items — a review pass that files
+nothing — or when the cycle count reaches `cycle_cap`, whichever comes first.
+
+The plan file's contract — the item schema, its six fields and its markers — is ralph's. See
+[The implementation plan contract](https://github.com/marc0der/ralph#the-implementation-plan-contract)
+in ralph's README.
 
 ## Requirements
 
-- **[marc0der/Archon](https://github.com/marc0der/Archon)** — this workflow needs
-  the fork, not upstream Archon (see below). Build/install from its `dev` branch.
+- **[Archon](https://archon.diy) v0.6.0 or later** — `loop.command` resolves an extracted command
+  file from that release onwards. Earlier versions cannot run this workflow.
 - [Bun](https://bun.sh) (the loop-control scripts run via `bun run`)
-- [GitHub CLI (`gh`)](https://cli.github.com), authenticated (`gh auth login`) — the
-  raise-PR phase opens/updates the pull request through it.
-
-### Why the fork?
-
-The PLAN and BUILD nodes are `loop` constructs that reference **extracted command
-files** by name:
-
-```yaml
-loop:
-  command: ralph-plan   # → .archon/commands/ralph-plan.md
-```
-
-Resolving `loop.command:` to an extracted command file isn't supported in upstream
-[Archon](https://archon.diy) yet — it's a change carried in
-[marc0der/Archon](https://github.com/marc0der/Archon) (a fork of
-[coleam00/Archon](https://github.com/coleam00/Archon)). Until it lands upstream,
-run this workflow against the fork.
 
 ## Install into a project
 
@@ -64,25 +63,20 @@ Options:
 
 ## Run the loop
 
-The workflow does **no git surgery** — branch creation and committing the spec are
-yours to do first. Before running:
-
-1. Update your base branch (e.g. `main`).
-2. Create a feature branch: `git checkout -b feature/<name>`.
-3. Commit your spec on it: `git add specs/<name>.md && git commit`.
-4. Push it: `git push -u origin HEAD`.
-
-Then run on that branch with `--no-worktree` (the loop operates on your real
-feature branch, so a throwaway worktree is wrong here). The goal is free text that
-names the spec:
-
 ```bash
-archon workflow run ralph-wiggum --cwd <repo> --no-worktree \
-  "Implement the X feature described in specs/x.md"
+archon workflow run ralph-wiggum "your goal here"
 ```
 
-The `precheck` node fails fast with guidance if you're not on a pushed feature
-branch, so a misconfigured run stops immediately rather than midway through.
+The goal is the positional message — there is no `-g` flag. It reaches the prompts as
+`$ARGUMENTS`, and the run stops before the first phase without one.
+
+| Input | Default | Meaning |
+|---|---|---|
+| `--input skip_push=true` | `false` | Keep every commit local; the build loop never pushes. |
+| `--input cycle_cap=2` | `3` | Stop after this many build/review cycles, open items or not. |
+
+Keep `cycle_cap` below the cycle's `max_iterations` of 20. That ceiling is Archon's safety net and
+exhausting it **fails** the run, where reaching `cycle_cap` ends it cleanly with a report.
 
 ## What gets installed
 
@@ -91,17 +85,14 @@ branch, so a misconfigured run stops immediately rather than midway through.
 ├── config.yaml                     # project-scoped Archon config (stub)
 ├── package.json / tsconfig.json    # Bun project for the control scripts
 ├── workflows/ralph-wiggum.yaml     # the workflow definition
-├── commands/                       # plan / build / review / pr / report prompts
+├── commands/                       # plan / build / report prompts
 │   ├── ralph-plan.md
 │   ├── ralph-build.md
-│   ├── ralph-review.md
-│   ├── ralph-pr.md
 │   └── ralph-report.md
 ├── ralph/templates/                # user-editable artifact templates
 │   ├── IMPLEMENTATION_PLAN.md
 │   └── PROGRESS.md
 └── scripts/                        # loop-control scripts (Node built-ins only)
-    ├── ralph-precheck.ts
     ├── ralph-seed.ts
     ├── ralph-plan-cap.ts
     ├── ralph-plan-count.ts
