@@ -14,11 +14,17 @@
  *
  * Stdout carries **one JSON object and nothing else** — `archived: null` is how
  * ralph's `Nothing to archive.` reaches the operator. Failures go to stderr.
+ *
+ * The node also opens the run's state in `ARTIFACTS_DIR`: `settings.json` (the
+ * only route the workflow inputs have to the `until_bash` cap scripts, which
+ * see no `INPUTS_*`), `run-start.txt` (the sha listing the report diffs against
+ * at the end) and the first row of `outcome.log`.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { appendOutcome, repoState, type Settings } from "./lib/ralph.ts";
 
 const TEMPLATE_DIR = ".archon/ralph/templates";
 const ARCHIVE_DIR = ".ralph";
@@ -45,7 +51,7 @@ function timestamp(now = new Date()): string {
 
 /**
  * Move every artifact present at the root into `.ralph/<timestamp>/`. Returns
- * that directory, or `null` when there was nothing to archive.
+ * that directory, or `null` when neither artifact was present.
  *
  * The directory is created lazily: an empty `.ralph/<timestamp>/` would read as
  * a cycle that shipped nothing, and `ralph-report` lists the archive.
@@ -94,6 +100,39 @@ export function ignoreArtifacts(): void {
   writeFileSync(GITIGNORE, text);
 }
 
+/**
+ * The workflow inputs, as Archon hands them to an exec node: every `INPUTS_*`
+ * value is a string, so `false` arrives as `"false"` and a cap of 3 as `"3"`.
+ *
+ * Validation mirrors `readSettings`, which reads this file back: `cycle_cap`
+ * must be an integer of at least 1, because a `NaN` or `0` cap makes
+ * `cycles >= cycle_cap` decide the fixpoint by accident rather than by input.
+ */
+export function settingsFromInputs(env = process.env): Settings {
+  const cap = Number(env.INPUTS_CYCLE_CAP);
+  return {
+    skip_push: env.INPUTS_SKIP_PUSH === "true",
+    cycle_cap: Number.isInteger(cap) && cap >= 1 ? cap : 3,
+  };
+}
+
+/**
+ * Open the run's state: the inputs the cap scripts read back, and the sha
+ * listing `ralph-report` diffs against to name the repositories that moved.
+ *
+ * `run-start.txt` is written after `scaffold`, so a repository the templates
+ * happen to carry is in the baseline rather than reported as having appeared.
+ */
+export function recordRunState(artifactsDir: string, archived: string | null): void {
+  writeFileSync(join(artifactsDir, "settings.json"), `${JSON.stringify(settingsFromInputs())}\n`);
+  writeFileSync(join(artifactsDir, "run-start.txt"), repoState());
+  // The trailing `/` matches the report's row: every archive is a directory.
+  appendOutcome(
+    artifactsDir,
+    archived === null ? "seed: nothing to archive" : `seed: archived previous cycle to ${archived}/`,
+  );
+}
+
 /** The branch the build loop will push. `ralph-precondition` has ruled out a detached HEAD. */
 function currentBranch(): string {
   try {
@@ -108,6 +147,14 @@ function currentBranch(): string {
 }
 
 export function main(): number {
+  const artifactsDir = process.env.ARTIFACTS_DIR;
+  // Checked before `archive` moves anything: a run that cannot record its own
+  // state should fail with the previous cycle still in the tree.
+  if (artifactsDir === undefined || artifactsDir === "") {
+    console.error("ralph-seed: ARTIFACTS_DIR is not set");
+    return 1;
+  }
+
   const archived = archive();
   const missing = scaffold();
   if (missing !== undefined) {
@@ -116,6 +163,7 @@ export function main(): number {
   }
   mkdirSync("specs", { recursive: true });
   ignoreArtifacts();
+  recordRunState(artifactsDir, archived);
   console.log(JSON.stringify({ root: process.cwd(), archived, branch: currentBranch() }));
   return 0;
 }
