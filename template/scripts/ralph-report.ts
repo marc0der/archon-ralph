@@ -24,10 +24,16 @@
  * Invoked by Archon as a named script (`runtime: bun`) with `trigger_rule:
  * all_done` and `always_run: true`, so it runs whatever the cycle group did.
  * `ARTIFACTS_DIR` says where the log and the marker are.
+ *
+ * The repositories row is the one figure that comes from outside the log:
+ * `run-start.txt` holds the sha listing from the start of the run, and the diff
+ * against `repoState()` at report time is what the run committed.
  */
 
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { repoState } from "./lib/ralph.ts";
 import { counts } from "./ralph-counts.ts";
 
 /** A cycle block closes on the line `ralph-cycle-cap` appends to end a cycle. */
@@ -202,6 +208,64 @@ function firstLine(text: string): string | null {
   return line === "" ? null : line;
 }
 
+/* ── The repositories a run moved ─────────────────────────────────────────── */
+
+/** A `<path> <sha>` listing, keyed by path, as `repoState` writes it. */
+function parseRepoState(text: string): Map<string, string> {
+  const shas = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    // The sha is the last field, so a repository path with a space parses too.
+    const space = line.lastIndexOf(" ");
+    if (space > 0) shas.set(line.slice(0, space), line.slice(space + 1));
+  }
+  return shas;
+}
+
+/**
+ * How far one repository moved: the commits it gained, or the bare word
+ * `moved` where no count can be taken (§4.2).
+ *
+ * `-` is `repoState`'s sha for a repository whose `HEAD` does not resolve, and
+ * a repository absent from `run-start.txt` appeared during the run; neither end
+ * of `<start>..HEAD` exists in those two cases. The `catch` covers the third:
+ * a start sha that is no longer reachable, which is what a rebase or a reset
+ * during the run leaves behind.
+ */
+function movement(repo: string, start: string, now: string): string {
+  if (start === "-" || now === "-") return "moved";
+  try {
+    const count = execFileSync("git", ["-C", repo, "rev-list", "--count", `${start}..HEAD`], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return `(${count} ${count === "1" ? "commit" : "commits"})`;
+  } catch {
+    return "moved";
+  }
+}
+
+/**
+ * Every repository whose `HEAD` differs from the listing `ralph-seed` recorded
+ * in `run-start.txt`, in the byte order `repoState` sorts them into.
+ *
+ * Only repositories that exist now are listed. `repoState` counts one that
+ * vanished as a change, because the build loop needs any change to read as
+ * progress (§4.1); this line is about commits, and a directory that is gone
+ * has none to count.
+ */
+export function movedRepos(artifactsDir: string): string[] {
+  const started = parseRepoState(readArtifact(artifactsDir, "run-start.txt"));
+  const rows: string[] = [];
+  for (const [repo, now] of parseRepoState(repoState())) {
+    const start = started.get(repo) ?? "-";
+    if (start === now) continue;
+    // `repoState` scans from `.`, so every nested path carries that prefix;
+    // §4.2 prints the path relative to the checkout root.
+    rows.push(`${repo.replace(/^\.\//, "")} ${movement(repo, start, now)}`);
+  }
+  return rows;
+}
+
 /** The summary, one string per line. */
 export function report(artifactsDir: string): string[] {
   const { seed, plan, cycles } = parseOutcome(readArtifact(artifactsDir, "outcome.log"));
@@ -233,7 +297,12 @@ export function report(artifactsDir: string): string[] {
       ),
     );
   });
-  lines.push(resultRow(cycles, abort), "", planRow(), ARTIFACTS_ROW);
+  lines.push(resultRow(cycles, abort), "", planRow());
+  // No line at all when nothing moved: a run that shipped nothing says so in
+  // its phase rows already, and an empty list reads as a missing number.
+  const moved = movedRepos(artifactsDir);
+  if (moved.length > 0) lines.push(`Repositories that moved: ${moved.join(", ")}`);
+  lines.push(ARTIFACTS_ROW);
   return lines;
 }
 
