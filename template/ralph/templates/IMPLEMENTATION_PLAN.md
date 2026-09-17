@@ -1,15 +1,44 @@
 # Implementation Plan
 
-**Prioritised list of work items. Order is priority — the build agent picks the top incomplete item. Formatted items only — no preamble, prose, or notes.**
-
 ## Entry Format
 
-Each entry must follow this structure exactly:
+This file holds three sections: this title, `## Entry Format`, and `## Items`. Never add another heading.
+
+Each entry uses these six fields, in this order, and no others:
 
 - [ ] **Short imperative title**
-  Scope: What is included and what is explicitly excluded (1-2 sentences).
-  Files: `path/to/key/file`, `path/to/other/file` (optional — omit when obvious)
-  Done when: Concrete verification criteria, referencing runnable commands where possible.
+  Spec: `specs/file.md` item N
+  Scope: What is included. What is excluded.
+  Files: `path/to/file`, `path/to/other`
+  Steps:
+  1. Imperative technical instruction.
+  2. Imperative technical instruction.
+  Done when: Criterion the agent can check without a human.
+
+Rules:
+
+- Order is priority. The build agent picks the top incomplete item.
+- The spec states what to build. The item states how to build it.
+- Cite a spec file plus an item number or a section name in `Spec`. A review finding instead cites
+  `IMPLEMENTATION_PLAN.md` plus the quoted title of the item it audits.
+- Write at most 150 words and 14 lines per item. Write at most 10 words per title.
+- Write at most 2 sentences for `Scope`. Write at most 2 sentences for `Done when`.
+- Name a symbol, file, flag, output, or error path of the item in `Done when`. Never make a whole-suite run the entire criterion.
+- One final verification item is the exception: it cites `AGENTS.md verification gate`, runs the project's full verification, and stays last.
+- Write at most 8 steps. Write one action per step. Write at most 20 words per step.
+- Split any item that needs a ninth step. That item is too large for one iteration.
+- Name symbols, option paths, literal values, and files to copy an idiom from.
+- Never cite line numbers. Never paste code. Every named token must be greppable.
+- List paths only in `Files`.
+- Write every field in Simplified Technical English. Use active voice and present tense.
+- Record no rationale, no evidence, no history, and no status. `PROGRESS.md` holds those.
+
+Markers:
+
+- `- [ ]` open
+- `- [x]` shipped
+- `- [~]` superseded or blocked; never delete it — add a replacement item instead
+
+Anchor every marker at column zero. Never nest one item under another.
 
 ## Items
-
