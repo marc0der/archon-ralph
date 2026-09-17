@@ -23,7 +23,13 @@
   "engines": {
     "bun": ">=1.0.0"
   },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "verify": "bun run typecheck && bun test"
+  },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "latest"
   }
 }
