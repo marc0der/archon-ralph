@@ -18,5 +18,5 @@
 
     "types": ["bun"]
   },
-  "include": ["bin/**/*.ts"]
+  "include": ["bin/**/*.ts", "test/**/*.ts", "template/scripts/**/*.ts"]
 }
