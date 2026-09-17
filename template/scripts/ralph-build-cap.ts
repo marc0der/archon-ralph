@@ -7,6 +7,10 @@
  * only into a nested repository, which moves nothing at the root. The listing
  * from `repoState()` is compared instead, and any difference counts as work.
  *
+ * Every iteration pushes the workspace branch before the exit decision, as
+ * ralph's push block precedes its early-exit check, so the commits of the
+ * iteration that ends the phase are not left behind.
+ *
  * Three conditions stop the loop, in this order:
  *
  *   1. `open == 0` — the plan is exhausted, which is the healthy exit.
@@ -15,6 +19,11 @@
  *      finds its item blocked is normal, and ralph gives it the same grace.
  *   3. the budget is spent — `computeBudget(open)` iterations, recomputed for
  *      this cycle by `ralph-snapshot`.
+ *
+ * A push git refuses is the fourth way out, and the only unhealthy one: it
+ * writes `abort.txt` and completes the loop, leaving `build-guard` to fail the
+ * run (§4.3). Continuing would pile more commits on a branch the remote has
+ * already refused.
  *
  * `until_bash` exit codes are inverted from a normal script (§2): exit 0
  * **completes** the loop, any non-zero exit means "keep looping". Every stop
@@ -28,6 +37,7 @@
  * the subprocess (§2), so the directory arrives textually as `argv[2]`.
  */
 
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -35,6 +45,7 @@ import {
   countItems,
   planItemsBody,
   readCounter,
+  readSettings,
   repoState,
   writeCounter,
 } from "./lib/ralph.ts";
@@ -57,6 +68,88 @@ function readState(file: string): string {
   } catch {
     return "";
   }
+}
+
+/** Whether a git command succeeded, and its combined output as `2>&1` gives. */
+interface GitResult {
+  ok: boolean;
+  output: string;
+}
+
+/**
+ * One git command, never throwing and never writing to this process's streams.
+ *
+ * Output is merged the way ralph's `push_output=$(git push … 2>&1)` merges it,
+ * because the string the upstream check looks for is on stderr. Piping stderr
+ * rather than inheriting it also keeps a failed push out of the node log twice:
+ * `abort.txt` is where the operator reads it.
+ */
+function gitRun(args: string[]): GitResult {
+  try {
+    return {
+      ok: true,
+      output: execFileSync("git", args, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string };
+    return { ok: false, output: `${failure.stdout ?? ""}${failure.stderr ?? ""}` };
+  }
+}
+
+/**
+ * Push the workspace branch (§4.2 step 4). Returns `true` when git refused it,
+ * which is the caller's signal to complete the loop and let the guard fail.
+ *
+ * Only the workspace is pushed. A build iteration that committed into a nested
+ * repository has pushed it itself if it could — the prompts make that the
+ * agent's job — and this script has no way to know which remote, branch or
+ * credentials any of them wants.
+ *
+ * The state is re-read from the workspace every iteration rather than cached at
+ * snapshot time: the agent may add the remote, or make the first commit, part
+ * way through the phase.
+ *
+ * `git` is injectable so the upstream retry has a test. There is no portable way
+ * to make real git report `has no upstream branch` for an explicit
+ * `git push origin <branch>`; the string only appears for an argumentless push.
+ * The branch is kept because ralph keeps it, and because a workspace `push.default`
+ * of `nothing` makes the explicit form the only one that works at all.
+ */
+export function pushWorkspace(artifactsDir: string, git = gitRun): boolean {
+  if (readSettings(artifactsDir).skip_push) return false;
+  if (!git(["remote", "get-url", "origin"]).ok) {
+    console.log("No 'origin' remote — skipping push.");
+    return false;
+  }
+  // `-q --verify` and not plain `rev-parse HEAD`: the plain form prints the
+  // literal `HEAD` and exits 0 in a commitless repository, so this would push
+  // a branch that does not exist yet.
+  if (!git(["rev-parse", "-q", "--verify", "HEAD"]).ok) {
+    console.log("No commit on the workspace branch — skipping push.");
+    return false;
+  }
+
+  const branch = git(["branch", "--show-current"]).output.trim();
+  let result = git(["push", "origin", branch]);
+  if (!result.ok && result.output.includes("has no upstream branch")) {
+    console.log("No upstream branch found. Setting upstream...");
+    // A retry that also fails is a rejection, unlike ralph, which ignores its
+    // exit status. Swallowing it would push nothing for the rest of the phase
+    // and report a clean run.
+    result = git(["push", "-u", "origin", branch]);
+  }
+  if (result.ok) return false;
+
+  // Git's own words, not a summary: a rejection is a non-fast-forward, a
+  // protected branch, a missing credential or a dead host, and the operator
+  // needs to know which before re-running.
+  const text = `build: push rejected\n${result.output.trim()}`;
+  writeFileSync(join(artifactsDir, "abort.txt"), `${text}\n`);
+  appendOutcome(artifactsDir, text);
+  return true;
 }
 
 export function main(argv = process.argv): number {
@@ -90,6 +183,11 @@ export function main(argv = process.argv): number {
   // no-op and stall the phase two iterations in.
   const noops = before === after ? readCounter(noopFile, 0) + 1 : 0;
   writeCounter(noopFile, noops);
+
+  // Before the exit decision, not after it: the iteration that ends the phase
+  // commits like any other, and a phase that exits with its work unpushed looks
+  // identical to one that never ran.
+  if (pushWorkspace(artifactsDir)) return 0;
 
   const budget = readCounter(join(artifactsDir, "build-budget.txt"), BUDGET_DEFAULT);
   // `planItemsBody` and not the whole file: the exemplar under `## Entry Format`
