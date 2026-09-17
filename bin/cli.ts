@@ -85,7 +85,10 @@ Commands:
 Options:
   --force, -f     Overwrite existing files instead of skipping them.
   --dir <path>    Target project root (default: current directory).
-  --help, -h      Show this help.`;
+  --help, -h      Show this help.
+
+Run the loop with:
+  archon workflow run ralph-wiggum "<goal>"`;
 
 function runInit(opts: Options): void {
   if (!existsSync(TEMPLATE_DIR)) {
@@ -115,8 +118,13 @@ function runInit(opts: Options): void {
   console.log(
     `\narchon-ralph: ${created} file(s) written, ${skipped} skipped into ${dest}/`,
   );
-  if (skipped > 0) console.log("Re-run with --force to overwrite skipped files.");
-  console.log("\nRun the loop with:  archon workflow run ralph-wiggum -g \"<goal>\"");
+  if (skipped > 0) {
+    console.log(
+      "Skipped files are not updated. Re-run with --force to bring .archon/ up to date;" +
+        " --force also overwrites ralph/templates/.",
+    );
+  }
+  console.log('\nRun the loop with:  archon workflow run ralph-wiggum "<goal>"');
 }
 
 const [command, ...rest] = process.argv.slice(2);
