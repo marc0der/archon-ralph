@@ -7,7 +7,8 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 /** Ralph's three plan-item markers, as they appear at column zero. */
 export type ItemMarker = "[ ]" | "[x]" | "[~]";
@@ -175,4 +176,77 @@ export function repoState(): string {
     .sort(byteOrder)
     .map((line) => `${line}\n`)
     .join("");
+}
+
+/* ── Run state: the files the cap scripts carry between iterations ────────── */
+
+/** `settings.json`: the workflow inputs, as `ralph-seed` records them (§4.2). */
+export interface Settings {
+  skip_push: boolean;
+  cycle_cap: number;
+}
+
+const SETTINGS_DEFAULTS: Settings = { skip_push: false, cycle_cap: 3 };
+
+/**
+ * The workflow inputs, read back from `<artifactsDir>/settings.json`.
+ *
+ * `until_bash` scripts run in Archon's loop executor and never see `INPUTS_*`
+ * (§4.2 step 5), so this file is the only way `skip_push` and `cycle_cap` reach
+ * `ralph-build-cap` and `ralph-cycle-cap`. Each field falls back on its own: a
+ * settings file that survived a partial write must still yield a usable cap
+ * rather than `NaN`, which would make `cycles >= cycle_cap` false forever and
+ * run the fixpoint to `max_iterations`.
+ */
+export function readSettings(artifactsDir: string): Settings {
+  try {
+    const parsed = JSON.parse(readFileSync(join(artifactsDir, "settings.json"), "utf8"));
+    return {
+      skip_push:
+        typeof parsed.skip_push === "boolean" ? parsed.skip_push : SETTINGS_DEFAULTS.skip_push,
+      cycle_cap:
+        Number.isInteger(parsed.cycle_cap) && parsed.cycle_cap >= 1
+          ? parsed.cycle_cap
+          : SETTINGS_DEFAULTS.cycle_cap,
+    };
+  } catch {
+    // Missing file, unreadable file, or not JSON at all: ralph's `|| echo`.
+    return { ...SETTINGS_DEFAULTS };
+  }
+}
+
+/**
+ * An iteration counter, or `fallback` when the file is missing, empty or holds
+ * anything but an integer. Mirrors ralph's `cat … 2>/dev/null || echo 0`.
+ *
+ * `Number`, not `parseInt`: `parseInt('3 passes')` is 3, so a half-written file
+ * would read as a plausible count instead of falling back. The empty-string
+ * guard is load-bearing for the same reason in the other direction — `Number('')`
+ * is 0, which would silently override a non-zero fallback such as the budget's.
+ */
+export function readCounter(file: string, fallback: number): number {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8").trim();
+  } catch {
+    return fallback;
+  }
+  const parsed = Number(text);
+  return text !== "" && Number.isInteger(parsed) ? parsed : fallback;
+}
+
+/** Write a counter back, newline-terminated so `cat` and `readCounter` agree. */
+export function writeCounter(file: string, n: number): void {
+  writeFileSync(file, `${n}\n`);
+}
+
+/**
+ * Append one line to `<artifactsDir>/outcome.log`.
+ *
+ * Every phase writes its row here and `ralph-report` reads its rows from this
+ * file alone (§4.2): `ralph-snapshot` zeroes the counters at the start of each
+ * cycle, so a figure that is not in this log is gone by report time.
+ */
+export function appendOutcome(artifactsDir: string, line: string): void {
+  appendFileSync(join(artifactsDir, "outcome.log"), `${line}\n`);
 }
