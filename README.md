@@ -101,6 +101,20 @@ on a plan with no open items and `ralph-review` on one with open items or nothin
 Keep `cycle_cap` below the cycle's `max_iterations` of 20. That ceiling is Archon's safety net and
 exhausting it **fails** the run, where reaching `cycle_cap` ends it cleanly with a report.
 
+`cycle_cap` bounds the cycles; the cycle node's `maxBudgetUsd` bounds the money. The `50` in
+`ralph-wiggum.yaml` is a placeholder — raise or lower it to what a run is worth to you, because
+exceeding it **fails** the run.
+
+To see the shape of a run before spending any of that, add `--dry-run` — the equivalent of ralph's
+`ralph auto --dry-run`:
+
+```bash
+archon workflow run ralph-wiggum "your goal here" --dry-run
+```
+
+It simulates the DAG, printing the nodes, their order and their guards, and runs nothing: no
+agent, no script, no commit.
+
 ## Supervised first cycle
 
 `ralph-wiggum` does whatever your specs and prompts tell it to, in a run you are not watching. A
@@ -123,6 +137,16 @@ the start of its run.
 
 Once a hand-run cycle gives you a plan you would have written and commits you would have made,
 `ralph-wiggum` runs the same thing without the waiting.
+
+## A failed run is re-run from scratch
+
+Resume is **unsupported**. There is no way to restart a failed `ralph-wiggum` run at the phase it
+died in; run the workflow again from the start.
+
+Nothing is lost by doing so. `ralph-wiggum` archives before it plans, so the plan the failed run
+worked from is under `.ralph/<timestamp>/`, and every commit its build loop already made is in
+git. A mistaken `archon workflow resume` is harmless rather than useful: it stops at the same
+guard, on the same abort marker, with the live plan untouched.
 
 ## The sandbox and the live checkout
 
