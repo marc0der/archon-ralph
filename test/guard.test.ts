@@ -77,9 +77,11 @@ describe("ralph-guard", () => {
       writeFileSync(marker, PUSH_ABORT);
 
       expect(runMain().code).toBe(1);
-      // `review-guard` runs after `build-guard` in the same cycle and
-      // `ralph-report` reads the file last. A guard that cleared it would make
-      // the run fail once and then report clean.
+      // The build block and the review block each declare a `guard`, so one
+      // cycle runs this script twice — composed, `review__guard` after
+      // `build__guard` (§12.3) — and `ralph-report` reads the file last. A
+      // guard that cleared it would make the run fail once and then report
+      // clean.
       expect(runMain().code).toBe(1);
       expect(Bun.file(marker).size).toBeGreaterThan(0);
     });

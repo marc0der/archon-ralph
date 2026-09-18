@@ -157,7 +157,7 @@ describe("ralph-review-cap", () => {
       snapshot(artifactsDir, 2);
 
       writePlan(["- [x] **One**", "- [ ] **Two**"]);
-      // 0 completes the loop; `review-guard` is what fails the run (§4.3).
+      // 0 completes the loop; `guard` is what fails the run (§4.3).
       expect(runMain(artifactsDir).code).toBe(0);
       expect(abort(artifactsDir)).toBe(`${UN_TICK}\n`);
       expect(outcome(artifactsDir)).toEqual([UN_TICK]);
