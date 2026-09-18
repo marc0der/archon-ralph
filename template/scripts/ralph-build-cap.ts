@@ -21,9 +21,16 @@
  *      this cycle by `ralph-snapshot`.
  *
  * A push git refuses is the fourth way out, and the only unhealthy one: it
- * writes `abort.txt` and completes the loop, leaving `build-guard` to fail the
- * run (§4.3). Continuing would pile more commits on a branch the remote has
- * already refused.
+ * writes `abort.txt` and completes the loop, leaving `guard` to fail the run
+ * (§4.3). Continuing would pile more commits on a branch the remote has already
+ * refused.
+ *
+ * The node ids named here are `ralph-build.yaml`'s, the file that declares this
+ * loop. A composed run inlines that file with `include: ralph-build`, and the
+ * expander namespaces every inlined id `<include-id>__<node-id>` — so the guard
+ * that reads the marker is `build__guard` and the counts node is `build__counts`
+ * inside `ralph-wiggum` (§12.3). The nodes and their order are the same either
+ * way, and nothing in this script reads an id.
  *
  * `until_bash` exit codes are inverted from a normal script (§2): exit 0
  * **completes** the loop, any non-zero exit means "keep looping". Every stop
@@ -196,8 +203,8 @@ export function main(argv = process.argv): number {
   // `planItemsBody` and not the whole file: the exemplar under `## Entry Format`
   // is an open item at column zero, so counting the file whole would leave an
   // exhausted plan one item short of exhausted and the loop would never take
-  // its healthy exit. A plan that is absent throws — `counts-pre-build` has
-  // already failed the run by then (§4.2).
+  // its healthy exit. A plan that is absent throws — `counts` has already
+  // failed the run by then (§4.2).
   const open = countItems(planItemsBody(), "[ ]");
 
   if (open === 0) {

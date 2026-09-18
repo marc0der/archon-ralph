@@ -12,7 +12,7 @@
  * shipped item puts it back in the build phase's queue and the next cycle
  * rebuilds what is already built. Review files findings as *new* items and
  * never re-opens an old one, so a `[x]` count that dropped is a broken pass and
- * not a judgement — it writes `abort.txt` and lets `review-guard` fail the run
+ * not a judgement — it writes `abort.txt` and lets `guard` fail the run
  * (§4.3). The baseline is `shipped-before.txt`, taken once per cycle by
  * `ralph-snapshot`, so a drop is caught on whichever pass causes it.
  *
@@ -68,7 +68,7 @@ export function main(argv = process.argv): number {
   // `planItemsBody` and not the whole file: the exemplar under `## Entry Format`
   // carries no `[x]`, but the count has to come from the same path the snapshot
   // counted with or the two are not comparable. A plan that is absent throws —
-  // `counts-pre-review` has already failed the run by then (§4.2).
+  // `counts` has already failed the run by then (§4.2).
   const shipped = countItems(planItemsBody(), "[x]");
   // 0 as the fallback, so a missing baseline can never read as a drop: a review
   // whose snapshot did not run must audit, not abort.
