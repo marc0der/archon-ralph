@@ -1,20 +1,31 @@
 /**
- * The workflow definition's structural invariants (spec §9).
+ * Every workflow definition's structural invariants (spec §9 and §12.7).
  *
  * Archon resolves `depends_on` and `$<node>.output` by name at run time. A
  * misspelt name is not an error there — the dependent is treated as unsatisfied
  * and *skipped* — so the failure this file exists to catch is a lifecycle that
  * reports success having silently never built anything. Nothing here asserts
  * prose; every assertion is a name the runtime resolves or a key it reads.
+ *
+ * §12.3 made the three phase workflows entry points in their own right, so the
+ * audit runs over every file under `template/workflows/`: a stale id in
+ * `ralph-build.yaml` breaks a standalone build that no `ralph-wiggum` run
+ * exercises. §12.7 states what that widening costs. `ralph-plan.yaml` declares
+ * no `when:` and no `loop_group`, so the §9 assertions that something *exists*
+ * become totals over the files, and the assertions naming `seed`, `build` and
+ * `review` stay scoped to the one file that declares those ids.
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { withTempRepo } from "./helpers.ts";
 
 const TEMPLATE = join(import.meta.dir, "../template");
-const WORKFLOW = join(TEMPLATE, "workflows/ralph-wiggum.yaml");
+const WORKFLOWS = join(TEMPLATE, "workflows");
+
+/** The composing lifecycle: the only file with a `loop_group` and a `seed`. */
+const LIFECYCLE = "ralph-wiggum.yaml";
 
 /** Where a `script:` or a `loop.command` resolves to. Archon omits the suffix. */
 function resolve(dir: string, name: string, suffix: string): string {
@@ -34,6 +45,16 @@ interface Placed {
   siblings: string[];
   /** `siblings`, every enclosing scope's ids, and its own `loop_group` body's. */
   visible: string[];
+}
+
+/** One parsed workflow file: its node tree, flattened and indexed. */
+interface Parsed {
+  /** The file name, which every failure message below carries. */
+  file: string;
+  workflow: unknown;
+  topLevel: Yaml[];
+  placed: Placed[];
+  byId: Map<string, Placed>;
 }
 
 function isYaml(value: unknown): value is Yaml {
@@ -78,11 +99,22 @@ function place(nodes: Yaml[], enclosing: string[] = []): Placed[] {
   });
 }
 
-const workflow = Bun.YAML.parse(readFileSync(WORKFLOW, "utf8"));
-const declared = isYaml(workflow) ? workflow["nodes"] : undefined;
-const topLevel = Array.isArray(declared) ? declared.filter(isYaml) : [];
-const placed = place(topLevel);
-const byId = new Map(placed.map((entry) => [entry.id, entry]));
+function parse(file: string): Parsed {
+  const workflow = Bun.YAML.parse(readFileSync(join(WORKFLOWS, file), "utf8"));
+  const declared = isYaml(workflow) ? workflow["nodes"] : undefined;
+  const topLevel = Array.isArray(declared) ? declared.filter(isYaml) : [];
+  const placed = place(topLevel);
+  const byId = new Map(placed.map((entry) => [entry.id, entry]));
+  return { file, workflow, topLevel, placed, byId };
+}
+
+const parsed = readdirSync(WORKFLOWS)
+  .filter((file) => file.endsWith(".yaml"))
+  .sort()
+  .map(parse);
+
+const lifecycle = parsed.find((entry) => entry.file === LIFECYCLE);
+if (lifecycle === undefined) throw new Error(`${LIFECYCLE} is absent from ${WORKFLOWS}`);
 
 /**
  * True when this node can be skipped: it carries a `when:`, something upstream
@@ -90,7 +122,7 @@ const byId = new Map(placed.map((entry) => [entry.id, entry]));
  * §4.3 is owed only to a loop that can be skipped; an unconditional one always
  * leaves its dependents satisfied.
  */
-function skippable(entry: Placed, seen = new Set<string>()): boolean {
+function skippable(byId: Map<string, Placed>, entry: Placed, seen = new Set<string>()): boolean {
   if (seen.has(entry.id)) return false;
   seen.add(entry.id);
   if (typeof entry.node["when"] === "string") return true;
@@ -100,115 +132,144 @@ function skippable(entry: Placed, seen = new Set<string>()): boolean {
   ];
   return upstream.some((id) => {
     const parent = byId.get(id);
-    return parent !== undefined && skippable(parent, seen);
+    return parent !== undefined && skippable(byId, parent, seen);
   });
 }
 
-describe("the workflow definition", () => {
-  test("parses into a node tree the walk descends into", async () => {
+/** True when a dependency of this node is a loop that can be skipped. */
+function followsSkippableLoop(byId: Map<string, Placed>, entry: Placed): boolean {
+  return strings(entry.node["depends_on"]).some((dep) => {
+    const parent = byId.get(dep);
+    return parent !== undefined && loopOf(parent.node) !== null && skippable(byId, parent);
+  });
+}
+
+describe("the workflow definitions", () => {
+  test("every file under template/workflows/ parses into a node tree", async () => {
     await withTempRepo(() => {
-      expect(isYaml(workflow)).toBe(true);
+      // §12.5 names four files. A `readdirSync` that matched nothing, or a
+      // glob that lost the phase workflows, would leave every assertion below
+      // iterating an empty list and auditing nothing.
+      expect(parsed.length).toBeGreaterThanOrEqual(4);
+      expect(parsed.map((entry) => entry.file)).toContain(LIFECYCLE);
+
+      for (const { file, workflow, topLevel, placed, byId } of parsed) {
+        expect({ file, parses: isYaml(workflow) }).toEqual({ file, parses: true });
+        expect({ file, nodes: topLevel.length > 0 }).toEqual({ file, nodes: true });
+
+        // Ids are how `depends_on` and `$<node>.output` resolve, so a duplicate
+        // or a missing one makes every reference to it ambiguous.
+        expect({ file, ids: byId.size }).toEqual({ file, ids: placed.length });
+        expect(
+          placed
+            .filter((entry) => typeof entry.node["id"] !== "string")
+            .map((entry) => `${file}: ${entry.id}`),
+        ).toEqual([]);
+      }
+    });
+  });
+
+  test("the walk descends into the cycle body", async () => {
+    await withTempRepo(() => {
       // More placed nodes than top-level ones proves the walk entered the
       // `loop_group` body. Were `bodyOf` to return nothing, every assertion
-      // below would pass over the six outer nodes and audit nothing.
-      expect(topLevel.length).toBeGreaterThan(0);
-      expect(placed.length).toBeGreaterThan(topLevel.length);
-      expect(placed.map((entry) => entry.id)).toContain("build");
-
-      // Ids are how `depends_on` and `$<node>.output` resolve, so a duplicate
-      // or a missing one makes every reference to it ambiguous.
-      expect(byId.size).toBe(placed.length);
-      expect(placed.filter((entry) => typeof entry.node["id"] !== "string")).toEqual([]);
+      // here would pass over the outer nodes and audit nothing. §12.7: the
+      // lifecycle is the only file with a body to descend into, so it is the
+      // only file that can prove the descent happened.
+      expect(lifecycle.placed.length).toBeGreaterThan(lifecycle.topLevel.length);
+      expect(lifecycle.placed.map((entry) => entry.id)).toContain("build");
     });
   });
 
   test("every depends_on entry names a node in the same scope", async () => {
     await withTempRepo(() => {
-      const edges = placed.flatMap((entry) =>
-        strings(entry.node["depends_on"]).map((dep) => ({ entry, dep })),
-      );
+      for (const { file, placed } of parsed) {
+        const edges = placed.flatMap((entry) =>
+          strings(entry.node["depends_on"]).map((dep) => ({ entry, dep })),
+        );
 
-      expect(edges.length).toBeGreaterThan(0);
-      expect(
-        edges
-          .filter(({ entry, dep }) => !entry.siblings.includes(dep))
-          .map(({ entry, dep }) => `${entry.id} → ${dep}`),
-      ).toEqual([]);
+        expect({ file, edges: edges.length > 0 }).toEqual({ file, edges: true });
+        expect(
+          edges
+            .filter(({ entry, dep }) => !entry.siblings.includes(dep))
+            .map(({ entry, dep }) => `${file}: ${entry.id} → ${dep}`),
+        ).toEqual([]);
+      }
     });
   });
 
   test("every $<node>.output reference names a node in scope", async () => {
     await withTempRepo(() => {
-      const refs = placed.flatMap((entry) => {
-        const loop = loopOf(entry.node);
-        const texts = [entry.node["when"], loop === null ? undefined : loop["until_bash"]];
-        return texts
-          .filter((text): text is string => typeof text === "string")
-          .flatMap((text) =>
-            [...text.matchAll(OUTPUT_REF)].map((match) => ({ entry, ref: String(match[1]) })),
-          );
-      });
+      const refs = parsed.flatMap(({ file, placed }) =>
+        placed.flatMap((entry) => {
+          const loop = loopOf(entry.node);
+          const texts = [entry.node["when"], loop === null ? undefined : loop["until_bash"]];
+          return texts
+            .filter((text): text is string => typeof text === "string")
+            .flatMap((text) =>
+              [...text.matchAll(OUTPUT_REF)].map((match) => ({ file, entry, ref: String(match[1]) })),
+            );
+        }),
+      );
 
-      // The two `when:` guards of the cycle body are the whole reason this
-      // check exists: a stale id there reads as an unsatisfied guard and skips
-      // the phase, which is indistinguishable from a legitimate skip.
+      // The `when:` guards of the build and review blocks are the whole reason
+      // this check exists: a stale id there reads as an unsatisfied guard and
+      // skips the phase, which is indistinguishable from a legitimate skip.
+      // The count is a total because `ralph-plan.yaml` declares no guard.
       expect(refs.length).toBeGreaterThan(0);
       expect(
         refs
           .filter(({ entry, ref }) => !entry.visible.includes(ref))
-          .map(({ entry, ref }) => `${entry.id} → ${ref}`),
+          .map(({ file, entry, ref }) => `${file}: ${entry.id} → ${ref}`),
       ).toEqual([]);
     });
   });
 
   test("every loop declares until_bash and max_iterations and no until", async () => {
     await withTempRepo(() => {
-      const loops = placed.flatMap((entry) => {
-        const loop = loopOf(entry.node);
-        return loop === null ? [] : [{ id: entry.id, loop }];
-      });
+      const loops = parsed.flatMap(({ file, placed }) =>
+        placed.flatMap((entry) => {
+          const loop = loopOf(entry.node);
+          return loop === null ? [] : [{ at: `${file}: ${entry.id}`, loop }];
+        }),
+      );
 
       expect(loops.length).toBeGreaterThan(0);
-      for (const { id, loop } of loops) {
-        expect({ id, until_bash: typeof loop["until_bash"] }).toEqual({ id, until_bash: "string" });
+      for (const { at, loop } of loops) {
+        expect({ at, until_bash: typeof loop["until_bash"] }).toEqual({ at, until_bash: "string" });
         // Without a ceiling a non-converging cap script loops forever; §3.4
         // retired the `until:` sentinels, and a leftover one would stop a loop
         // on a phrase in the agent's prose instead of on the cap's verdict.
         const max_iterations = typeof loop["max_iterations"];
-        expect({ id, max_iterations }).toEqual({ id, max_iterations: "number" });
-        expect({ id, until: loop["until"] }).toEqual({ id, until: undefined });
+        expect({ at, max_iterations }).toEqual({ at, max_iterations: "number" });
+        expect({ at, until: loop["until"] }).toEqual({ at, until: undefined });
       }
     });
   });
 
   test("every node after a skippable loop joins with all_done", async () => {
     await withTempRepo(() => {
-      const joining = placed
-        .filter((entry) => entry.node["trigger_rule"] === "all_done")
-        .map((entry) => entry.id)
-        .sort();
+      const following = parsed.flatMap(({ file, placed, byId }) =>
+        placed
+          .filter((entry) => followsSkippableLoop(byId, entry))
+          .map((entry) => ({ at: `${file}: ${entry.id}`, node: entry.node })),
+      );
 
-      // The four nodes spec §9 names. `counts-pre-review` is in the list and
-      // `cycle` is not, which is why the structural rule below is stated over
-      // loops that can be skipped rather than over every loop.
-      expect(joining).toEqual(["build-guard", "counts-pre-review", "report", "review-guard"]);
-
-      const missing = placed.filter((entry) => {
-        const followsSkippableLoop = strings(entry.node["depends_on"]).some((dep) => {
-          const parent = byId.get(dep);
-          return parent !== undefined && loopOf(parent.node) !== null && skippable(parent);
-        });
-        return followsSkippableLoop && entry.node["trigger_rule"] !== "all_done";
-      });
-
-      expect(missing.map((entry) => entry.id)).toEqual([]);
+      // The rule is owed only to a loop that can be skipped, so the check
+      // below is vacuous unless some loop is. A total stands in for the literal
+      // node list §9 used to name: the phase files each guard their own loop,
+      // so the same shape now appears four times over with different ids.
+      expect(following.length).toBeGreaterThan(0);
+      expect(
+        following.filter(({ node }) => node["trigger_rule"] !== "all_done").map(({ at }) => at),
+      ).toEqual([]);
     });
   });
 
   test("build and review declare no trigger_rule", async () => {
     await withTempRepo(() => {
       for (const id of ["build", "review"]) {
-        const entry = byId.get(id);
+        const entry = lifecycle.byId.get(id);
         expect(entry).toBeDefined();
         // §3.1: a false guard must skip the phase itself. A join rule here
         // would run the phase the guard just excluded.
@@ -220,7 +281,7 @@ describe("the workflow definition", () => {
 
   test("seed declares no always_run", async () => {
     await withTempRepo(() => {
-      const seed = byId.get("seed");
+      const seed = lifecycle.byId.get("seed");
       expect(seed).toBeDefined();
       // §12.2: `always_run` is a resume-cache opt-out, and a resume re-executes
       // the node and invalidates every dependent's cached output. On `seed`
@@ -232,44 +293,55 @@ describe("the workflow definition", () => {
       });
 
       // The exception is `seed` alone: every other side-effecting exec node
-      // still declares it, so this is a considered omission and not a lost key.
-      const optedOut = placed
-        .filter((entry) => typeof entry.node["script"] === "string")
-        .filter((entry) => entry.node["always_run"] !== true)
-        .map((entry) => entry.id)
-        .sort();
-      expect(optedOut).toEqual(["precondition", "seed"]);
+      // still declares it, in every file, so this is a considered omission and
+      // not a lost key. §12.7 keeps `precondition` off the list everywhere —
+      // it writes nothing, so its verdict may come from the resume cache.
+      for (const { file, placed } of parsed) {
+        const optedOut = placed
+          .filter((entry) => typeof entry.node["script"] === "string")
+          .filter((entry) => entry.node["always_run"] !== true)
+          .map((entry) => entry.id)
+          .sort();
+        const expected = file === LIFECYCLE ? ["precondition", "seed"] : ["precondition"];
+        expect({ file, optedOut }).toEqual({ file, optedOut: expected });
+      }
     });
   });
 
   test("every script names a file under template/scripts/", async () => {
     await withTempRepo(() => {
-      const scripts = placed.flatMap((entry) => {
-        const script = entry.node["script"];
-        return typeof script === "string" ? [{ id: entry.id, script }] : [];
-      });
+      for (const { file, placed } of parsed) {
+        const scripts = placed.flatMap((entry) => {
+          const script = entry.node["script"];
+          return typeof script === "string" ? [{ id: entry.id, script }] : [];
+        });
 
-      expect(scripts.length).toBeGreaterThan(0);
-      expect(
-        scripts
-          .filter(({ script }) => !existsSync(resolve("scripts", script, ".ts")))
-          .map(({ id, script }) => `${id} → ${script}`),
-      ).toEqual([]);
+        expect({ file, scripts: scripts.length > 0 }).toEqual({ file, scripts: true });
+        expect(
+          scripts
+            .filter(({ script }) => !existsSync(resolve("scripts", script, ".ts")))
+            .map(({ id, script }) => `${file}: ${id} → ${script}`),
+        ).toEqual([]);
+      }
     });
   });
 
   test("every loop command names a file under template/commands/", async () => {
     await withTempRepo(() => {
-      const commands = placed.flatMap((entry) => {
-        const command = loopOf(entry.node)?.["command"];
-        return typeof command === "string" ? [{ id: entry.id, command }] : [];
-      });
+      const commands = parsed.flatMap(({ file, placed }) =>
+        placed.flatMap((entry) => {
+          const command = loopOf(entry.node)?.["command"];
+          return typeof command === "string" ? [{ file, id: entry.id, command }] : [];
+        }),
+      );
 
+      // A total: the lifecycle's `cycle` node is a `loop_group` with no command
+      // of its own, so a per-file count would assert the wrong thing there.
       expect(commands.length).toBeGreaterThan(0);
       expect(
         commands
           .filter(({ command }) => !existsSync(resolve("commands", command, ".md")))
-          .map(({ id, command }) => `${id} → ${command}`),
+          .map(({ file, id, command }) => `${file}: ${id} → ${command}`),
       ).toEqual([]);
     });
   });
