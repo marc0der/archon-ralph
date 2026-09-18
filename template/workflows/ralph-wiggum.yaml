@@ -20,8 +20,17 @@ description: |
 # and the prompts delegate heavy reasoning to subagents rather than to a second
 # model. Drop to `sonnet` for faster, cheaper iterations.
 #
+# The three phases live in ralph-plan.yaml, ralph-build.yaml and
+# ralph-review.yaml and are inlined here with `include:`. Archon writes an
+# included file's provider, model and sandbox onto its own nodes before
+# inlining them, so the blocks below run under the PHASE file's provider, model
+# and sandbox — not under these. All four files therefore carry the same values
+# and must stay matched; a divergence changes the composed run silently.
+#
 # Isolation: the run acts on the live checkout, like ralph. Commit and branch
 # state is the operator's, and nested repositories are reached where they sit.
+# `worktree:` is run-owned: the phase files' copies are dropped when composed
+# and this one applies to every block.
 provider: claude
 model: opus
 
@@ -31,6 +40,8 @@ worktree:
 # The boundary for a run Archon executes with permissions bypassed. Writes stay
 # allowed outside the denials below, because a nested repository may sit
 # anywhere; extend the domain allowlist with your own git host and registries.
+# This block governs the nodes declared here; extending the boundary for the
+# phases means editing all four workflow files.
 sandbox:
   enabled: true
   autoAllowBashIfSandboxed: true
@@ -52,15 +63,27 @@ nodes:
   # PRECONDITION — fail fast on a goalless run, a detached HEAD, a
   # non-repository or a missing tool. It writes nothing, so a resume may
   # reuse its verdict.
+  #
+  # `plan` mode is the one that requires the goal, and it runs here before
+  # `seed`, so a goalless run stops before anything is archived. The plan
+  # block runs its own copy again, which is cheap and keeps the block
+  # standalone.
   # ═══════════════════════════════════════════════════════════════════════
   - id: precondition
     script: ralph-precondition
     runtime: bun
+    with: { mode: plan }
 
   # ═══════════════════════════════════════════════════════════════════════
   # SEED — archive the previous cycle, scaffold the artifacts from
   # .archon/ralph/templates/, ignore them, and record the run's settings and
   # starting repository state (`ralph archive` + `ralph init`).
+  #
+  # `archive` mode is this node's alone. Every block runs the same script in
+  # `init` mode, which scaffolds only what is absent and merges its inputs
+  # into the settings this node wrote, so the plan a block is about to build
+  # is never filed away mid-run. A node's `with:` merges over the run's
+  # inputs, so skip_push and cycle_cap still reach this node's environment.
   #
   # The one exception to the always_run rule: archiving must not repeat
   # within a run, so a resume reuses the cached output and leaves the live
@@ -71,34 +94,33 @@ nodes:
     depends_on: [precondition]
     script: ralph-seed
     runtime: bun
+    with: { mode: archive }
 
   # ═══════════════════════════════════════════════════════════════════════
-  # PLAN — analyse specs + code, write IMPLEMENTATION_PLAN.md. The snapshot
-  # records the plan fingerprint the cap compares against; the cap stops on
-  # an unchanged fingerprint or at ralph's cap of 6 passes, both graceful.
-  # max_iterations is a safety ceiling above the cap, never the bound.
+  # PLAN — analyse specs + code, write IMPLEMENTATION_PLAN.md. The block is
+  # ralph-plan.yaml inlined: its nodes run in THIS run, namespaced
+  # `plan__<node-id>`, so they share ARTIFACTS_DIR and the outcome log,
+  # settings and counters keep working unchanged. `depends_on: [seed]`
+  # attaches to the block's entry node, and `$plan` waits on every sink of
+  # it. The block's own report prints the interim plan row; the summary
+  # below is the product.
   # ═══════════════════════════════════════════════════════════════════════
-  - id: plan-snapshot
-    depends_on: [seed]
-    script: ralph-snapshot
-    runtime: bun
-    with: { mode: plan }
-    always_run: true
-
   - id: plan
-    depends_on: [plan-snapshot]
-    idle_timeout: 600000
-    loop:
-      command: ralph-plan
-      max_iterations: 7
-      fresh_context: true
-      until_bash: bun run .archon/scripts/ralph-plan-cap.ts "$ARTIFACTS_DIR"
+    depends_on: [seed]
+    include: ralph-plan
 
   # ═══════════════════════════════════════════════════════════════════════
   # CYCLE — one iteration is one ralph cycle: build to exhaustion, then
   # review. The group completes when the plan holds no open items or the
   # cycle cap is reached. maxBudgetUsd is the money bound; max_iterations is
   # a ceiling cycle_cap must stay below.
+  #
+  # The body is the two phase files inlined. Each keeps its own counts node,
+  # `when:` guard, snapshot, cap script and guard, so a build with nothing
+  # open and a review with nothing shipped skip and report exactly as they
+  # do standalone. `review` depends on `build`, which waits on every sink of
+  # the build block — its guard included, so a rejected push stops the cycle
+  # before the audit.
   # ═══════════════════════════════════════════════════════════════════════
   - id: cycle
     depends_on: [plan]
@@ -107,89 +129,31 @@ nodes:
       max_iterations: 20
       until_bash: bun run .archon/scripts/ralph-cycle-cap.ts "$ARTIFACTS_DIR"
       nodes:
-        # ─────────────────────────────────────────────────────────────────
-        # BUILD — one plan item per fresh iteration. Guarded on open items,
-        # read from the plan as it stands at the start of this cycle. The
-        # cap stops on an exhausted plan, two iterations with no repository
-        # change, or the spent budget; the guard fails the run on a marker
-        # the cap wrote (a rejected push).
-        # ─────────────────────────────────────────────────────────────────
-        - id: counts-pre-build
-          script: ralph-counts
-          runtime: bun
-          always_run: true
-
-        - id: build-snapshot
-          depends_on: [counts-pre-build]
-          when: "$counts-pre-build.output.open > 0"
-          script: ralph-snapshot
-          runtime: bun
-          with: { mode: build }
-          always_run: true
-
+        # skip_push is the one input a block reads. It reaches the build cap
+        # through settings.json, which the block's `init` merges it into;
+        # the expander substitutes this run's value at load time.
         - id: build
-          depends_on: [build-snapshot]
-          idle_timeout: 600000
-          loop:
-            command: ralph-build
-            max_iterations: 200
-            fresh_context: true
-            until_bash: bun run .archon/scripts/ralph-build-cap.ts "$ARTIFACTS_DIR"
-
-        - id: build-guard
-          depends_on: [build]
-          trigger_rule: all_done
-          script: ralph-guard
-          runtime: bun
-          always_run: true
-
-        # ─────────────────────────────────────────────────────────────────
-        # REVIEW — audit the shipped items and file findings as new plan
-        # items. Guarded on a plan with nothing open and something shipped,
-        # so a build that stopped short leaves the audit to the next cycle.
-        # The cap aborts a pass that un-ticks an item; the guard fails on it.
-        # The join rule on the guards is what lets a node run after a loop
-        # upstream was skipped as well as after one that ran.
-        # ─────────────────────────────────────────────────────────────────
-        - id: counts-pre-review
-          depends_on: [build-guard]
-          trigger_rule: all_done
-          script: ralph-counts
-          runtime: bun
-          always_run: true
-
-        - id: review-snapshot
-          depends_on: [counts-pre-review]
-          when: "$counts-pre-review.output.open == 0 && $counts-pre-review.output.shipped > 0"
-          script: ralph-snapshot
-          runtime: bun
-          with: { mode: review }
-          always_run: true
+          include: ralph-build
+          with: { skip_push: "$INPUTS.skip_push" }
 
         - id: review
-          depends_on: [review-snapshot]
-          idle_timeout: 600000
-          loop:
-            command: ralph-review
-            max_iterations: 7
-            fresh_context: true
-            until_bash: bun run .archon/scripts/ralph-review-cap.ts "$ARTIFACTS_DIR"
-
-        - id: review-guard
-          depends_on: [review]
-          trigger_rule: all_done
-          script: ralph-guard
-          runtime: bun
-          always_run: true
+          depends_on: [build]
+          include: ralph-review
 
   # ═══════════════════════════════════════════════════════════════════════
   # REPORT — the factual lifecycle summary, from outcome.log, abort.txt,
   # run-start.txt and the plan. Read-only, and exits 0 even after an abort:
   # the guard already failed the run, and the summary is the product.
+  #
+  # It names every upstream id rather than `cycle` alone: the join rule
+  # relaxes the state a dependency may be in, not the set, so a failed
+  # precondition, seed or plan would otherwise leave `cycle` unreachable and
+  # the summary unprinted. `auto` is the mode that prints it.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
-    depends_on: [cycle]
+    depends_on: [precondition, seed, plan, cycle]
     trigger_rule: all_done
     script: ralph-report
     runtime: bun
+    with: { mode: auto }
     always_run: true
