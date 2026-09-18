@@ -7,6 +7,11 @@
  * pair really comes from the checked-in templates, and that `.gitignore` grows
  * by three lines once and never again — a second copy of an entry per run would
  * be the visible symptom of a node that stopped being idempotent.
+ *
+ * That destructiveness is exactly what `INPUTS_MODE=init` withholds (§12.4).
+ * Every phase workflow opens with it, and composed into `ralph-wiggum` it runs
+ * again on the plan the cycle is building against, so the last describe pins
+ * the three things it must never do: archive, overwrite, or guess at a mode.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -39,15 +44,25 @@ function installTemplates(): void {
   cpSync(SOURCE_TEMPLATES, TEMPLATE_DIR, { recursive: true });
 }
 
-/** `main()` with stdout captured: its contract is that stdout is one JSON object. */
-function runMain(): { code: number; out: string; err: string } {
+/**
+ * `main()` with stdout captured: its contract is that stdout is one JSON object.
+ *
+ * The default keeps every pre-mode test reading `process.env`, which
+ * `withTempRepo` owns: it sets `ARTIFACTS_DIR` there per test, so a snapshot
+ * taken once at definition time would point every test at the first fixture.
+ */
+function runMain(env: NodeJS.ProcessEnv = process.env): {
+  code: number;
+  out: string;
+  err: string;
+} {
   const out: string[] = [];
   const err: string[] = [];
   const { log, error } = console;
   console.log = (...args: unknown[]) => void out.push(args.join(" "));
   console.error = (...args: unknown[]) => void err.push(args.join(" "));
   try {
-    return { code: main(), out: out.join("\n"), err: err.join("\n") };
+    return { code: main(env), out: out.join("\n"), err: err.join("\n") };
   } finally {
     console.log = log;
     console.error = error;
@@ -253,6 +268,74 @@ describe("ralph-seed output", () => {
       installTemplates();
 
       expect(JSON.parse(runMain().out).archived).toBeNull();
+    });
+  });
+});
+
+describe("ralph-seed init mode", () => {
+  /** The plan a phase workflow finds in the tree, in a shape `init` must not touch. */
+  const PLAN = "# Implementation Plan\n\n## Items\n\n- [ ] **Ship the thing**\n";
+
+  // The whole reason `init` exists: `ralph-build` runs it on the plan it is
+  // about to build, and an unconditional scaffold would replace that plan with
+  // the empty template between the precondition and the build agent.
+  test("leaves an existing IMPLEMENTATION_PLAN.md byte-identical", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+      writeFileSync("IMPLEMENTATION_PLAN.md", PLAN);
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" }).code).toBe(0);
+
+      expect(readFileSync("IMPLEMENTATION_PLAN.md", "utf8")).toBe(PLAN);
+    });
+  });
+
+  // Only-when-absent is per artifact, not per pair: `ralph-plan` on a fresh
+  // checkout still needs both, and a half-seeded tree still needs the half.
+  test("scaffolds a missing PROGRESS.md from the template", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+      writeFileSync("IMPLEMENTATION_PLAN.md", PLAN);
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" }).code).toBe(0);
+
+      expect(readFileSync("PROGRESS.md", "utf8")).toBe(
+        readFileSync(join(SOURCE_TEMPLATES, "PROGRESS.md"), "utf8"),
+      );
+      expect(readFileSync("IMPLEMENTATION_PLAN.md", "utf8")).toBe(PLAN);
+    });
+  });
+
+  // Archiving is `seed`'s alone. A block that archived would file away the
+  // plan the cycle is mid-way through, once per phase.
+  test("creates no directory under .ralph/", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+      writeFileSync("IMPLEMENTATION_PLAN.md", PLAN);
+      writeFileSync("PROGRESS.md", "old progress\n");
+
+      const { code, out } = runMain({ ...process.env, INPUTS_MODE: "init" });
+
+      expect(code).toBe(0);
+      expect(existsSync(".ralph")).toBe(false);
+      expect(JSON.parse(out).archived).toBeNull();
+    });
+  });
+
+  // A typo in `with: {mode: …}` must not fall back to `archive`: that mode
+  // moves the plan the block was about to build. The message names both modes
+  // so the operator can correct the workflow file from it.
+  test("fails an unrecognised INPUTS_MODE and names both modes", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+      writeFileSync("IMPLEMENTATION_PLAN.md", PLAN);
+
+      const { code, err } = runMain({ ...process.env, INPUTS_MODE: "innit" });
+
+      expect(code).toBe(1);
+      expect(err).toContain("INPUTS_MODE must be archive, init");
+      expect(err).toContain('got "innit"');
+      expect(readFileSync("IMPLEMENTATION_PLAN.md", "utf8")).toBe(PLAN);
     });
   });
 });

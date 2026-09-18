@@ -7,12 +7,24 @@
  * `INPUTS_*` (§4.2 step 5), so a wrong default here silently changes when the
  * fixpoint stops. `outcome.log` is the sole source of the report's rows (§4.2),
  * so a seed that writes no row makes the whole summary start at `plan`.
+ *
+ * `INPUTS_MODE=init` defers to all three instead of writing them (§12.4). The
+ * last describe pins that deference, because every phase block runs `init`
+ * again inside a live `ralph-wiggum` run: a re-recorded baseline would hide
+ * the repositories that moved since, a second row would break the report's
+ * one-row-per-phase reading, and an overwritten `settings.json` would reset
+ * the cap that decides when the fixpoint stops.
  */
 
 import { describe, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { main, recordRunState, settingsFromInputs } from "../template/scripts/ralph-seed.ts";
+import {
+  main,
+  mergeSettings,
+  recordRunState,
+  settingsFromInputs,
+} from "../template/scripts/ralph-seed.ts";
 import { readSettings, repoState } from "../template/scripts/lib/ralph.ts";
 import { withTempRepo } from "./helpers.ts";
 
@@ -25,13 +37,18 @@ function installTemplates(): void {
   cpSync(SOURCE_TEMPLATES, TEMPLATE_DIR, { recursive: true });
 }
 
-/** `main()` with stdout captured: its contract is that stdout is one JSON object. */
-function runMain(): number {
+/**
+ * `main()` with stdout captured: its contract is that stdout is one JSON object.
+ *
+ * The default is re-read per call, so the tests that set an `INPUTS_*` on
+ * `process.env` inside their own body keep working unchanged.
+ */
+function runMain(env: NodeJS.ProcessEnv = process.env): number {
   const { log, error } = console;
   console.log = () => {};
   console.error = () => {};
   try {
-    return main();
+    return main(env);
   } finally {
     console.log = log;
     console.error = error;
@@ -162,6 +179,108 @@ describe("ralph-seed run state", () => {
       // state must not consume the artifacts it was going to file away.
       expect(readFileSync("IMPLEMENTATION_PLAN.md", "utf8")).toBe("old plan\n");
       expect(existsSync(".ralph")).toBe(false);
+    });
+  });
+});
+
+describe("ralph-seed init mode run state", () => {
+  /** A plan in the tree: every case here is a block opening on a live run. */
+  function seedTree(): void {
+    installTemplates();
+    writeFileSync("IMPLEMENTATION_PLAN.md", "# Implementation Plan\n\n## Items\n");
+    writeFileSync("PROGRESS.md", "# Progress Log\n");
+  }
+
+  // One row per phase is what the report reads. Three blocks each logging
+  // their own `init` would put three seed rows above the plan row.
+  test("appends no row to outcome.log", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      seedTree();
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" })).toBe(0);
+
+      expect(existsSync(join(artifactsDir, "outcome.log"))).toBe(false);
+    });
+  });
+
+  test("leaves an outcome.log seed already wrote alone", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      seedTree();
+      writeFileSync(join(artifactsDir, "outcome.log"), "seed: nothing to archive\n");
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" })).toBe(0);
+
+      expect(outcomeLines(artifactsDir)).toEqual(["seed: nothing to archive"]);
+    });
+  });
+
+  // The baseline is the start of the *run*, not of the block. Re-recording it
+  // here would hide every repository that moved since `seed` wrote it from
+  // `ralph-report`'s `movedRepos`.
+  test("keeps an existing run-start.txt unchanged", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      seedTree();
+      const baseline = ". 0123456789abcdef0123456789abcdef01234567\n";
+      writeFileSync(join(artifactsDir, "run-start.txt"), baseline);
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" })).toBe(0);
+
+      expect(readFileSync(join(artifactsDir, "run-start.txt"), "utf8")).toBe(baseline);
+    });
+  });
+
+  // The other half: standalone there is no `seed` before the block, so the
+  // block's `init` is the only chance to record a baseline at all.
+  test("records run-start.txt when it is absent", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      seedTree();
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" })).toBe(0);
+
+      expect(readFileSync(join(artifactsDir, "run-start.txt"), "utf8")).toBe(repoState());
+    });
+  });
+});
+
+describe("mergeSettings", () => {
+  // The case §12.4 introduces the merge for: `seed` wrote the cap, and the
+  // build block's `init` adds `skip_push` beside it. `settingsFromInputs`
+  // would substitute its own default of 3 and change when the fixpoint stops.
+  test("adds skip_push to a settings.json holding cycle_cap alone", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeFileSync(join(artifactsDir, "settings.json"), `${JSON.stringify({ cycle_cap: 7 })}\n`);
+
+      mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "true" });
+
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 7 });
+    });
+  });
+
+  // An input the node does not declare arrives absent, not as a default, so
+  // it must not displace the value already in the file.
+  test("leaves a key alone when its input is absent or unusable", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      const file = join(artifactsDir, "settings.json");
+      writeFileSync(file, `${JSON.stringify({ skip_push: true, cycle_cap: 7 })}\n`);
+
+      mergeSettings(artifactsDir, {});
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 7 });
+
+      mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "", INPUTS_CYCLE_CAP: "0" });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 7 });
+    });
+  });
+
+  // Standalone there is no `seed`, so the file starts missing and `init` is
+  // what creates it. `readSettings` falls back per field for the rest.
+  test("writes the named inputs alone when the file is missing", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "true" });
+
+      expect(JSON.parse(readFileSync(join(artifactsDir, "settings.json"), "utf8"))).toEqual({
+        skip_push: true,
+      });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 3 });
     });
   });
 });
