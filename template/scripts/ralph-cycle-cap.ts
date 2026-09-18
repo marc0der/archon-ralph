@@ -63,7 +63,8 @@ export function main(argv = process.argv): number {
   // `planItemsBody` and not the whole file: the exemplar under `## Entry Format`
   // is an open item textually, and counting it would make `open` 1 on an
   // exhausted plan — every run would then spend its full `cycle_cap`. A plan
-  // that is absent throws; `counts-pre-build` has already failed the run (§4.2).
+  // that is absent throws; the build block's `counts` has already failed the
+  // run (§4.2).
   const open = countItems(planItemsBody(), "[ ]");
   if (open === 0) {
     appendOutcome(artifactsDir, `cycle ${cycles}: clean — no open items remain`);
