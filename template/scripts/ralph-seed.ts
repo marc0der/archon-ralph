@@ -1,12 +1,24 @@
 #!/usr/bin/env bun
 /**
- * Ralph SEED node — archive the previous cycle, then scaffold this one (§4.2).
+ * Ralph SEED node — open the run's plan artifacts and its run state (§4.2).
  *
- * This is ralph's `archive` and `init` phases in one node, in that order. The
- * order is the whole point: a run that lives in the checkout ends with its own
- * `IMPLEMENTATION_PLAN.md` and `PROGRESS.md` in the tree, so the next run has
- * to move them aside before it can scaffold a clean pair. Archiving last would
- * file away the plan the run just finished building against.
+ * One script, two modes, read from `INPUTS_MODE` (`with: {mode: …}` in the
+ * workflow).
+ *
+ * `archive` is `ralph-wiggum`'s `seed`, and ralph's `archive` and `init` phases
+ * in one node, in that order. The order is the whole point: a run that lives in
+ * the checkout ends with its own `IMPLEMENTATION_PLAN.md` and `PROGRESS.md` in
+ * the tree, so the next run has to move them aside before it can scaffold a
+ * clean pair. Archiving last would file away the plan the run just finished
+ * building against.
+ *
+ * `init` is `ralph init` and nothing more, and it is what every phase workflow
+ * runs: scaffold each artifact **only when absent**, never archive, write
+ * `run-start.txt` only when absent, merge the inputs into `settings.json`
+ * rather than overwrite it, and append no `outcome.log` row. Composed into
+ * `ralph-wiggum` it finds everything `seed` left in place and does nothing;
+ * standalone it is what lets `ralph-plan` run on a fresh checkout and
+ * `ralph-build` run on the plan already in the tree (§12.4).
  *
  * Archon invokes this by name (`script: ralph-seed`) with the checkout root as
  * the working directory, so every path here is relative to it and `root` in the
@@ -32,6 +44,15 @@ const GITIGNORE = ".gitignore";
 
 /** The two loop artifacts, archived and scaffolded as a pair. */
 const ARTIFACTS = ["IMPLEMENTATION_PLAN.md", "PROGRESS.md"] as const;
+
+/** The two ways to open a run: `ralph-wiggum`'s cycle, and `ralph init`. */
+const MODES = ["archive", "init"] as const;
+
+export type Mode = (typeof MODES)[number];
+
+export function isMode(value: string | undefined): value is Mode {
+  return MODES.some((mode) => mode === value);
+}
 
 /**
  * The lines `ralph init` adds. Ralph also ignores its three `PROMPT_*.md`
@@ -69,13 +90,20 @@ export function archive(): string | null {
  * Copy both artifacts out of the template directory. Returns the path of the
  * first missing template, so `main` can name it and fail the run.
  *
- * The copy is unconditional because `archive` has just moved both artifacts
- * away. A missing template is misconfiguration — the tree is checked in — and
- * ralph's warn-and-continue would leave the build agent planning against a
- * file the plan prompt never wrote.
+ * `whenAbsent` is the difference between the two modes. In `archive` mode the
+ * copy is unconditional, because `archive` has just moved both artifacts away.
+ * In `init` mode an artifact already in the tree is the plan the phase is about
+ * to work on, and overwriting it with the template is the one thing `init` must
+ * never do; a template missing for an artifact that is present is then not
+ * consulted at all.
+ *
+ * An unread template is still misconfiguration — the tree is checked in — and
+ * ralph's warn-and-continue would leave the build agent planning against a file
+ * the plan prompt never wrote.
  */
-export function scaffold(): string | undefined {
+export function scaffold(whenAbsent = false): string | undefined {
   for (const name of ARTIFACTS) {
+    if (whenAbsent && existsSync(name)) continue;
     const template = join(TEMPLATE_DIR, name);
     if (!existsSync(template)) return template;
     copyFileSync(template, name);
@@ -117,15 +145,69 @@ export function settingsFromInputs(env = process.env): Settings {
 }
 
 /**
+ * Overlay the inputs this node was actually given onto `settings.json`, leaving
+ * every other key as it was found.
+ *
+ * `init` merges where `archive` overwrites (§12.4): inside `ralph-wiggum` the
+ * file already holds the `cycle_cap` `seed` wrote, and the build block's `init`
+ * adds `skip_push` to it. `settingsFromInputs` would instead substitute its own
+ * default for whichever input that node does not declare, and a `cycle_cap`
+ * silently reset to 3 changes when the fixpoint stops.
+ *
+ * An input that is absent, blank or unusable is treated as not given rather
+ * than as a default, so it cannot displace a good value already in the file.
+ * Writing a file that holds one key alone is safe: `readSettings` falls back
+ * per field.
+ */
+export function mergeSettings(artifactsDir: string, env = process.env): void {
+  const file = join(artifactsDir, "settings.json");
+  let merged: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      merged = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Missing, unreadable, or not JSON at all: start from the named inputs.
+  }
+
+  if (env.INPUTS_SKIP_PUSH !== undefined && env.INPUTS_SKIP_PUSH !== "") {
+    merged.skip_push = env.INPUTS_SKIP_PUSH === "true";
+  }
+  const cap = Number(env.INPUTS_CYCLE_CAP);
+  if (Number.isInteger(cap) && cap >= 1) merged.cycle_cap = cap;
+
+  writeFileSync(file, `${JSON.stringify(merged)}\n`);
+}
+
+/**
  * Open the run's state: the inputs the cap scripts read back, and the sha
  * listing `ralph-report` diffs against to name the repositories that moved.
  *
  * `run-start.txt` is written after `scaffold`, so a repository the templates
  * happen to carry is in the baseline rather than reported as having appeared.
+ *
+ * In `init` mode both writes defer to what is already there. The baseline is
+ * recorded only when absent, because a block's `init` can run cycles after
+ * `seed` recorded the real start of the run, and re-recording it would hide
+ * every repository that moved in between. The `outcome.log` row is `seed`'s
+ * alone: an `init` row per block would put several of them in a log the report
+ * reads as one row per phase.
  */
-export function recordRunState(artifactsDir: string, archived: string | null): void {
-  writeFileSync(join(artifactsDir, "settings.json"), `${JSON.stringify(settingsFromInputs())}\n`);
-  writeFileSync(join(artifactsDir, "run-start.txt"), repoState());
+export function recordRunState(
+  artifactsDir: string,
+  archived: string | null,
+  mode: Mode = "archive",
+  env = process.env,
+): void {
+  const settings = join(artifactsDir, "settings.json");
+  if (mode === "init") mergeSettings(artifactsDir, env);
+  else writeFileSync(settings, `${JSON.stringify(settingsFromInputs(env))}\n`);
+
+  const runStart = join(artifactsDir, "run-start.txt");
+  if (mode === "archive" || !existsSync(runStart)) writeFileSync(runStart, repoState());
+
+  if (mode === "init") return;
   // The trailing `/` matches the report's row: every archive is a directory.
   appendOutcome(
     artifactsDir,
@@ -146,8 +228,8 @@ function currentBranch(): string {
   }
 }
 
-export function main(): number {
-  const artifactsDir = process.env.ARTIFACTS_DIR;
+export function main(env = process.env): number {
+  const artifactsDir = env.ARTIFACTS_DIR;
   // Checked before `archive` moves anything: a run that cannot record its own
   // state should fail with the previous cycle still in the tree.
   if (artifactsDir === undefined || artifactsDir === "") {
@@ -155,15 +237,29 @@ export function main(): number {
     return 1;
   }
 
-  const archived = archive();
-  const missing = scaffold();
+  // An absent mode is `archive`, today's behaviour, so this script lands before
+  // the composition commit that declares `with: {mode: …}` everywhere and
+  // `ralph-wiggum.yaml` keeps working in between (§12.7). An *unrecognised*
+  // mode fails, as `ralph-snapshot` fails it: a typo on the build block's node
+  // must not default to `archive` and file away the plan it was about to build.
+  const declared = env.INPUTS_MODE;
+  const mode = declared === undefined || declared === "" ? "archive" : declared;
+  if (!isMode(mode)) {
+    console.error(
+      `ralph-seed: INPUTS_MODE must be ${MODES.join(", ")}; got ${JSON.stringify(declared)}`,
+    );
+    return 1;
+  }
+
+  const archived = mode === "archive" ? archive() : null;
+  const missing = scaffold(mode === "init");
   if (missing !== undefined) {
     console.error(`ralph-seed: template missing at ${missing}; refusing to scaffold a fallback`);
     return 1;
   }
   mkdirSync("specs", { recursive: true });
   ignoreArtifacts();
-  recordRunState(artifactsDir, archived);
+  recordRunState(artifactsDir, archived, mode, env);
   console.log(JSON.stringify({ root: process.cwd(), archived, branch: currentBranch() }));
   return 0;
 }
