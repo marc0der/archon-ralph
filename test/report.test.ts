@@ -42,15 +42,26 @@ function writePlan(shipped: number, open: number, superseded: number): void {
   );
 }
 
-/** `main()` with stdout and stderr captured. */
-function runMain(): { code: number; stdout: string[]; stderr: string[] } {
+/**
+ * `main()` with stdout and stderr captured.
+ *
+ * `env` *defaults* to `process.env` rather than capturing it, because
+ * `withTempRepo` sets `ARTIFACTS_DIR` per test and one test below deletes it
+ * mid-body; a snapshot taken at definition time would point every call at the
+ * wrong artifacts directory.
+ */
+function runMain(env: NodeJS.ProcessEnv = process.env): {
+  code: number;
+  stdout: string[];
+  stderr: string[];
+} {
   const { log, error } = console;
   const out: string[] = [];
   const err: string[] = [];
   console.log = (line: string) => out.push(line);
   console.error = (line: string) => err.push(line);
   try {
-    return { code: main(), stdout: out, stderr: err };
+    return { code: main(env), stdout: out, stderr: err };
   } finally {
     console.log = log;
     console.error = error;
@@ -243,6 +254,167 @@ describe("ralph-report", () => {
       build: "build: 2 iterations, plan exhausted",
       review: null,
       end: null,
+    });
+  });
+});
+
+/**
+ * The four modes of §12.4, one renderer each.
+ *
+ * A block report is the interim line a phase workflow prints, so it is asserted
+ * whole rather than by substring: the thing that distinguishes it from the
+ * summary is everything it leaves out — no `Ralph lifecycle summary` header, no
+ * cycle block, no `Result:` row — and a `toContain` assertion cannot see an
+ * absence. Every mode is passed as a literal at its call site rather than
+ * through a helper, because the mode is the one thing each test is about.
+ */
+describe("ralph-report modes", () => {
+  /**
+   * The log a block report reads: the rows of the cycle `ralph-cycle-cap` has
+   * not closed yet.
+   *
+   * No `cycle N:` line, because a block reports from inside its own cycle. A
+   * closed trailing block reads as no block at all, which is the case the
+   * skipped-row tests below cover.
+   */
+  const MID_CYCLE = [
+    "seed: archived previous cycle to .ralph/20260917-101500/",
+    "plan: converged on pass 3",
+    "build: 9 iterations, plan exhausted",
+    "review: converged on pass 2, audited 9 shipped items",
+  ];
+
+  /** The `Plan:` row every block report ends on, from `writePlan(7, 2, 1)`. */
+  const PLAN_ROW = "Plan: 7 shipped, 2 open, 1 superseded";
+
+  test("prints the plan row and the plan counts in plan mode", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, MID_CYCLE);
+      writePlan(7, 2, 1);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "plan" });
+
+      expect(ran.code).toBe(0);
+      expect(ran.stderr).toEqual([]);
+      expect(ran.stdout).toEqual(["  plan     ran — converged on pass 3", "", PLAN_ROW]);
+    });
+  });
+
+  test("prints the build row and the plan counts in build mode", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, MID_CYCLE);
+      writePlan(7, 2, 1);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "build" });
+
+      expect(ran.code).toBe(0);
+      // No `Repositories that moved:` row: nothing recorded a `run-start.txt`,
+      // so no repository can be shown to have moved against it.
+      expect(ran.stdout).toEqual(["  build    ran — 9 iterations, plan exhausted", "", PLAN_ROW]);
+    });
+  });
+
+  test("prints the review row and the plan counts in review mode", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, MID_CYCLE);
+      writePlan(7, 2, 1);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "review" });
+
+      expect(ran.code).toBe(0);
+      // No `, filed F findings` clause: the count is read off the `cycle N:`
+      // line, which is appended after the review block has already reported.
+      expect(ran.stdout).toEqual([
+        "  review   ran — converged on pass 2, audited 9 shipped items",
+        "",
+        PLAN_ROW,
+      ]);
+    });
+  });
+
+  // The same log, the same plan, the whole summary: `auto` is `ralph-wiggum`'s
+  // mode and adding the three block modes must not have moved one line of it.
+  test("still prints the summary §4.2 quotes in auto mode", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, MID_CYCLE);
+      writePlan(7, 2, 1);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "auto" });
+
+      expect(ran.code).toBe(0);
+      expect(ran.stdout).toEqual([
+        "Ralph lifecycle summary",
+        "  seed     ran — archived previous cycle to .ralph/20260917-101500/",
+        "  plan     ran — converged on pass 3",
+        "  cycle 1",
+        "    build  ran — 9 iterations, plan exhausted",
+        "    review ran — converged on pass 2, audited 9 shipped items",
+        "  Result: stopped with open items after 1 cycle",
+        "",
+        PLAN_ROW,
+        "Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; " +
+          "previous cycle under .ralph/<timestamp>/",
+      ]);
+    });
+  });
+
+  // A standalone block whose `when:` guard was false: the loop was skipped, and
+  // `report` runs anyway under `trigger_rule: all_done` (§12.3). The log holds
+  // the rows of the phases that did run and no row for this one.
+  test("reports a skipped block from a log with no phase row", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, ["seed: nothing to archive", "plan: converged on pass 1"]);
+      writePlan(0, 3, 0);
+
+      const built = runMain({ ...process.env, INPUTS_MODE: "build" });
+      const reviewed = runMain({ ...process.env, INPUTS_MODE: "review" });
+
+      expect(built.code).toBe(0);
+      expect(built.stdout).toEqual([
+        "  build    skipped — no open items",
+        "",
+        "Plan: 0 shipped, 3 open, 0 superseded",
+      ]);
+      expect(reviewed.code).toBe(0);
+      expect(reviewed.stdout).toEqual([
+        "  review   skipped — no shipped items to audit",
+        "",
+        "Plan: 0 shipped, 3 open, 0 superseded",
+      ]);
+    });
+  });
+
+  // An absent mode is `auto`, today's behaviour, so this script landed before
+  // the composition commit that declares `with: {mode: …}` on every node.
+  test("defaults an absent INPUTS_MODE to auto", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, MID_CYCLE);
+      writePlan(7, 2, 1);
+      const { INPUTS_MODE: _unset, ...env } = process.env;
+
+      const ran = runMain(env);
+
+      expect(ran.code).toBe(0);
+      expect(ran.stdout).toEqual(report(artifactsDir));
+      expect(ran.stdout[0]).toBe("Ralph lifecycle summary");
+    });
+  });
+
+  // A typo in `with: {mode: …}` must print nothing at all: a mode that fell
+  // back to `auto` would print the whole lifecycle summary mid-run and let the
+  // operator read it as this block's report.
+  test("fails an unrecognised INPUTS_MODE and prints no report", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, MID_CYCLE);
+      writePlan(7, 2, 1);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "repot" });
+
+      expect(ran.code).toBe(1);
+      expect(ran.stdout).toEqual([]);
+      expect(ran.stderr).toEqual([
+        'ralph-report: INPUTS_MODE must be auto, plan, build, review; got "repot"',
+      ]);
     });
   });
 });
