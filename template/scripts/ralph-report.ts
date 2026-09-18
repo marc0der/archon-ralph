@@ -2,6 +2,13 @@
 /**
  * Ralph REPORT node — the lifecycle summary (spec §4.2).
  *
+ * One script, four modes, read from `INPUTS_MODE` (`with: {mode: …}` in the
+ * workflow). `auto` prints the summary §4.2 quotes and belongs to
+ * `ralph-wiggum`; `plan`, `build` and `review` print one phase block's interim
+ * report and belong to the phase workflows of §12.3. Composed, the block
+ * reports run too: their lines say what each phase did while the run is still
+ * going, and the summary at the end is the record (§12.4).
+ *
  * Every phase row comes out of `outcome.log` and out of nothing else.
  * `ralph-snapshot` zeroes the per-phase counters at the start of each cycle, so
  * by report time those files hold the last cycle's numbers only; anything a row
@@ -19,7 +26,9 @@
  * has already failed the run, and a report that failed as well would bury the
  * summary under a second error. Every read is therefore best-effort: a missing
  * log, a missing marker and a missing plan each render as a row rather than
- * throwing.
+ * throwing. An unrecognised `INPUTS_MODE` is the one exception, because it is a
+ * typo in the workflow rather than a run outcome: it fails, as `ralph-snapshot`
+ * fails it.
  *
  * Invoked by Archon as a named script (`runtime: bun`) with `trigger_rule:
  * all_done` and `always_run: true`, so it runs whatever the cycle group did.
@@ -35,6 +44,15 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoState } from "./lib/ralph.ts";
 import { counts } from "./ralph-counts.ts";
+
+/** The lifecycle summary, then one mode per phase workflow (§12.4). */
+const MODES = ["auto", "plan", "build", "review"] as const;
+
+export type Mode = (typeof MODES)[number];
+
+export function isMode(value: string | undefined): value is Mode {
+  return MODES.some((mode) => mode === value);
+}
 
 /** A cycle block closes on the line `ralph-cycle-cap` appends to end a cycle. */
 const CYCLE_END = /^cycle \d+: /;
@@ -266,10 +284,20 @@ export function movedRepos(artifactsDir: string): string[] {
   return rows;
 }
 
+/** What every renderer reads: the parsed log and the abort marker's first line. */
+function readRun(artifactsDir: string): { outcome: Outcome; abort: string | null } {
+  return {
+    outcome: parseOutcome(readArtifact(artifactsDir, "outcome.log")),
+    abort: firstLine(readArtifact(artifactsDir, "abort.txt")),
+  };
+}
+
 /** The summary, one string per line. */
 export function report(artifactsDir: string): string[] {
-  const { seed, plan, cycles } = parseOutcome(readArtifact(artifactsDir, "outcome.log"));
-  const abort = firstLine(readArtifact(artifactsDir, "abort.txt"));
+  const {
+    outcome: { seed, plan, cycles },
+    abort,
+  } = readRun(artifactsDir);
 
   const lines = [
     "Ralph lifecycle summary",
@@ -306,14 +334,108 @@ export function report(artifactsDir: string): string[] {
   return lines;
 }
 
+/* ── The block reports (§12.4) ───────────────────────────────────── */
+
+/**
+ * The cycle a block is reporting on: the one block `ralph-cycle-cap` has not
+ * closed yet, or `null` when the current cycle appended no row at all.
+ *
+ * The last `build:` or `review:` row in the whole log is the wrong row. A
+ * review block skipped on its `when:` guard — the build stopped short and left
+ * open items — would otherwise report the row of an earlier cycle's review as
+ * if this one had run. A closed trailing block means the same thing as no
+ * block: whatever this cycle did, it wrote no row for it.
+ */
+function currentCycle(cycles: Cycle[]): Cycle | null {
+  const last = cycles.at(-1);
+  return last === undefined || last.end !== null ? null : last;
+}
+
+/**
+ * One phase block's report: the row its cap script appended, then the plan
+ * counts.
+ *
+ * The row goes through the same `topRow` and `phaseState` as the summary, so
+ * the interim lines a composed run prints line up with the summary that
+ * follows them. Neither the cycle's `filed F findings` clause nor a counted
+ * skip reason is available here: both are read off the `cycle N:` line, which
+ * `ralph-cycle-cap` appends after the block has already reported.
+ */
+function phaseReport(
+  label: string,
+  line: string | null,
+  abort: string | null,
+  absent: string,
+): string[] {
+  return [topRow(label, phaseState(label, line, abort, absent)), "", planRow()];
+}
+
+/** The `plan` block's report. An absent row means the loop never ran (§3.1). */
+export function planReport(artifactsDir: string): string[] {
+  const { outcome, abort } = readRun(artifactsDir);
+  return phaseReport("plan", outcome.plan, abort, NOT_REACHED);
+}
+
+/**
+ * The `build` block's report, with the repositories the run moved.
+ *
+ * The block commits, so this is the one block report that says what landed;
+ * `movedRepos` is measured against the same `run-start.txt` the summary uses,
+ * so a standalone `ralph-build` reports its commits exactly as the lifecycle
+ * does.
+ */
+export function buildReport(artifactsDir: string): string[] {
+  const { outcome, abort } = readRun(artifactsDir);
+  const build = currentCycle(outcome.cycles)?.build ?? null;
+  const lines = phaseReport("build", build, abort, "skipped — no open items");
+  const moved = movedRepos(artifactsDir);
+  if (moved.length > 0) lines.push(`Repositories that moved: ${moved.join(", ")}`);
+  return lines;
+}
+
+/**
+ * The `review` block's report.
+ *
+ * The absent row is the guard's first clause and not its second: a block with
+ * open items outstanding skipped for that reason, but the row it prints names
+ * the audit, because that is the phase that did not happen.
+ */
+export function reviewReport(artifactsDir: string): string[] {
+  const { outcome, abort } = readRun(artifactsDir);
+  const review = currentCycle(outcome.cycles)?.review ?? null;
+  return phaseReport("review", review, abort, "skipped — no shipped items to audit");
+}
+
+/** The renderer each mode prints. Exhaustive over `MODES` by type. */
+const RENDER: Record<Mode, (artifactsDir: string) => string[]> = {
+  auto: report,
+  plan: planReport,
+  build: buildReport,
+  review: reviewReport,
+};
+
 export function main(env = process.env): number {
+  // An absent mode is `auto`, today's behaviour, so this script lands before
+  // the composition commit that declares `with: {mode: …}` everywhere and
+  // `ralph-wiggum.yaml` keeps working in between (§12.7). An *unrecognised*
+  // mode is checked before anything is printed: a typo must not print the
+  // lifecycle summary in the middle of a run and call it a phase report.
+  const declared = env.INPUTS_MODE;
+  const mode = declared === undefined || declared === "" ? "auto" : declared;
+  if (!isMode(mode)) {
+    console.error(
+      `ralph-report: INPUTS_MODE must be ${MODES.join(", ")}; got ${JSON.stringify(declared)}`,
+    );
+    return 1;
+  }
+
   const artifactsDir = env.ARTIFACTS_DIR ?? "";
   if (artifactsDir === "") {
     // Still exit 0, still print: every row reads `not reached`, which is honest
     // about what could be seen, and stderr says why nothing could be.
     console.error("ralph-report: ARTIFACTS_DIR is not set");
   }
-  for (const line of report(artifactsDir)) console.log(line);
+  for (const line of RENDER[mode](artifactsDir)) console.log(line);
   return 0;
 }
 
