@@ -1,6 +1,6 @@
 {
   "name": "archon-ralph",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scaffold the Ralph Wiggum autonomous plan/build loop (an Archon workflow) into any project.",
   "type": "module",
   "license": "MIT",
