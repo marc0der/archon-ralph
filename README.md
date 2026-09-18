@@ -71,13 +71,58 @@ archon workflow run ralph-wiggum "your goal here"
 The goal is the positional message — there is no `-g` flag. It reaches the prompts as
 `$ARGUMENTS`, and the run stops before the first phase without one.
 
+Each phase also runs on its own, like ralph's `plan`, `build` and `review` commands.
+`ralph-wiggum` is the three of them composed:
+
+| Workflow | Runs | Goal |
+|---|---|---|
+| `ralph-plan` | the plan loop: rewrite `IMPLEMENTATION_PLAN.md` from `specs/` and the code | required |
+| `ralph-build` | the build loop: implement the open items, test, commit, push | none |
+| `ralph-review` | the review loop: audit the shipped items, file findings as open items | none |
+| `ralph-wiggum` | plan, then build/review as a `loop_group` to the fixpoint, then report | required |
+
+`ralph-plan` and `ralph-wiggum` **require** the goal, and stop before the first phase without one.
+`ralph-build` and `ralph-review` take **none** — the plan in the tree is their whole input — and a
+positional message passed to either is neither required nor refused, because inside `ralph-wiggum`
+it is the parent's goal.
+
+A phase workflow that has nothing to do is **skipped and reported**, never an error: `ralph-build`
+on a plan with no open items and `ralph-review` on one with open items or nothing shipped both exit
+0 with a report. That is the same guard the lifecycle uses, so the two entry points behave alike.
+
 | Input | Default | Meaning |
 |---|---|---|
 | `--input skip_push=true` | `false` | Keep every commit local; the build loop never pushes. |
 | `--input cycle_cap=2` | `3` | Stop after this many build/review cycles, open items or not. |
 
+`skip_push` is declared by `ralph-build` and `ralph-wiggum`, `cycle_cap` by `ralph-wiggum` alone;
+`ralph-plan` and `ralph-review` take no inputs.
+
 Keep `cycle_cap` below the cycle's `max_iterations` of 20. That ceiling is Archon's safety net and
 exhausting it **fails** the run, where reaching `cycle_cap` ends it cleanly with a report.
+
+## Supervised first cycle
+
+`ralph-wiggum` does whatever your specs and prompts tell it to, in a run you are not watching. A
+weak `Done when` costs you one iteration by hand and a whole build phase unattended.
+
+Run a cycle yourself first:
+
+1. `archon workflow run ralph-plan "<goal>"`, then read `IMPLEMENTATION_PLAN.md`. Are the items
+   small enough for one iteration? Can the agent check every `Done when` without you?
+2. `archon workflow run ralph-build --input skip_push=true`, then read the commits. This is what
+   tells you whether your `CLAUDE.md` or `AGENTS.md` names the right test command, and
+   `skip_push=true` keeps the branch local while you find out.
+3. `archon workflow run ralph-review`, once build has emptied the plan. Findings about style or
+   taste mean the prompts need work, not more iterations.
+4. Tune the prompts in `.archon/commands/`. Iterate on those, not on the loop.
+
+Each step leaves the plan and the log in the tree for the next one to pick up: the phase workflows
+scaffold an artifact only when it is absent, and archive nothing. Only `ralph-wiggum` archives, at
+the start of its run.
+
+Once a hand-run cycle gives you a plan you would have written and commits you would have made,
+`ralph-wiggum` runs the same thing without the waiting.
 
 ## The sandbox and the live checkout
 
@@ -90,8 +135,8 @@ Meta repositories are supported. The agent commits each changed file into the re
 it — the one `git -C <dir> rev-parse --show-toplevel` names — and pushes that repository itself.
 The build loop's own push touches the workspace and nothing else.
 
-Archon runs Claude with `permissionMode: bypassPermissions`, so the `sandbox:` block in
-`workflows/ralph-wiggum.yaml` is the boundary:
+Archon runs Claude with `permissionMode: bypassPermissions`, so the `sandbox:` block in the
+workflow file is the boundary:
 
 ```yaml
 sandbox:
@@ -103,7 +148,14 @@ sandbox:
     allowedDomains: ["github.com", "api.github.com", "registry.npmjs.org", "bun.sh"]
 ```
 
-Extend it by editing that block: add paths to `denyWrite`, and add your git host and package
+All four workflow files declare that same block, and each one governs its own nodes: Archon writes
+an included file's `sandbox:` onto its own nodes before inlining them, so a composed `ralph-wiggum`
+run executes the plan, build and review phases under the **phase file's** boundary rather than its
+own. Extending the boundary therefore means editing all four files — `ralph-wiggum.yaml`,
+`ralph-plan.yaml`, `ralph-build.yaml` and `ralph-review.yaml` — and a block widened in one of them
+alone applies to that phase only.
+
+Extend it by editing those blocks: add paths to `denyWrite`, and add your git host and package
 registries to `allowedDomains` — a domain that is not listed is not reachable, so a push to a
 self-hosted forge fails until you list it. `allowWrite` is deliberately unset: a nested repository,
 symlinked checkouts included, may sit anywhere under the workspace, and a write allowlist would
@@ -118,7 +170,11 @@ the supported path rather than as containment.
 .archon/
 ├── config.yaml                     # project-scoped Archon config (stub)
 ├── package.json / tsconfig.json    # Bun project for the control scripts
-├── workflows/ralph-wiggum.yaml     # the workflow definition
+├── workflows/                      # the workflow definitions
+│   ├── ralph-wiggum.yaml           # the full lifecycle; composes the three below
+│   ├── ralph-plan.yaml             # the plan phase, standalone
+│   ├── ralph-build.yaml            # the build phase, standalone
+│   └── ralph-review.yaml           # the review phase, standalone
 ├── commands/                       # plan / build / review prompts
 │   ├── ralph-plan.md
 │   ├── ralph-build.md
