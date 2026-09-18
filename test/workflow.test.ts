@@ -19,7 +19,9 @@
  * An unresolvable `include:` target, or a `with:` key naming an input its
  * target never declares, is caught by the loader rather than the executor: the
  * composing workflow is dropped, so the lifecycle does not run short — it does
- * not run at all.
+ * not run at all. The same holds for the four header fields and for `name:`
+ * and `description:`: the expander stamps a phase file's header onto its own
+ * nodes, so the composed run inherits a divergence rather than overriding it.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -125,6 +127,38 @@ function inputsOf(entry: Parsed | undefined): string[] {
   const workflow = entry?.workflow;
   const inputs = isYaml(workflow) ? workflow["inputs"] : undefined;
   return isYaml(inputs) ? Object.keys(inputs) : [];
+}
+
+/**
+ * The workflow-level fields the include expander writes onto a file's nodes.
+ *
+ * §12.7: `collapseWorkflowScope` stamps an included file's node-affecting
+ * fields onto its own nodes before inlining them, so a composed run executes
+ * a block under the **phase file's** `sandbox:`. `worktree:` travels the other
+ * way — it is run-owned and dropped — but a phase file that ran standalone
+ * under a different work tree would still diverge, so all four are compared.
+ */
+const HEADER_FIELDS = ["provider", "model", "worktree", "sandbox"] as const;
+
+/** The four node-affecting header fields of a file, as one comparable value. */
+function headerOf(entry: Parsed): Yaml {
+  const workflow = isYaml(entry.workflow) ? entry.workflow : {};
+  return Object.fromEntries(HEADER_FIELDS.map((field) => [field, workflow[field]]));
+}
+
+/** A non-empty top-level string, which `schemas/workflow.ts` requires. */
+function declares(entry: Parsed, key: string): boolean {
+  const value = isYaml(entry.workflow) ? entry.workflow[key] : undefined;
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+/** The scripts that route on `INPUTS_MODE` and default an absent value. */
+const MODE_DRIVEN = ["ralph-precondition", "ralph-seed", "ralph-snapshot", "ralph-report"];
+
+/** The `with:` block of a node, or an empty map for a node declaring none. */
+function withOf(node: Yaml): Yaml {
+  const declared = node["with"];
+  return isYaml(declared) ? declared : {};
 }
 
 const parsed = readdirSync(WORKFLOWS)
@@ -419,6 +453,62 @@ describe("the workflow definitions", () => {
               node["script"] !== undefined ||
               loopOf(node) !== null,
           )
+          .map(({ at }) => at),
+      ).toEqual([]);
+    });
+  });
+
+  test("every workflow declares the same provider, model, worktree and sandbox", async () => {
+    await withTempRepo(() => {
+      // §12.7: the expander writes a phase file's `provider`, `model` and
+      // `sandbox` onto its own nodes, so the composed lifecycle runs each
+      // block under the block file's boundary and not its own. Divergence is
+      // therefore invisible from `ralph-wiggum.yaml` alone: widening a phase
+      // file's `sandbox:` silently widens the composed run too.
+      const [first, ...rest] = parsed;
+      if (first === undefined) throw new Error(`no workflow file under ${WORKFLOWS}`);
+      const expected = headerOf(first);
+      for (const entry of rest) {
+        expect({ file: entry.file, header: headerOf(entry) }).toEqual({
+          file: entry.file,
+          header: expected,
+        });
+      }
+
+      // §12.7: `schemas/workflow.ts` requires both as non-empty strings, and
+      // `include:` resolves its target through the map keyed by `name:`. A
+      // file missing either is dropped at load time rather than run short.
+      for (const entry of parsed) {
+        expect({
+          file: entry.file,
+          name: declares(entry, "name"),
+          description: declares(entry, "description"),
+        }).toEqual({ file: entry.file, name: true, description: true });
+      }
+    });
+  });
+
+  test("every mode-driven script node declares its mode", async () => {
+    await withTempRepo(() => {
+      const nodes = parsed.flatMap(({ file, placed }) =>
+        placed
+          .filter((entry) => MODE_DRIVEN.includes(String(entry.node["script"])))
+          .map((entry) => ({ at: `${file}: ${entry.id}`, node: entry.node })),
+      );
+
+      // Four files times at least three mode-driven nodes each. A filter that
+      // matched nothing — a renamed script, a lost `placed` list — would leave
+      // the rule below asserting over an empty list.
+      expect(nodes.length).toBeGreaterThanOrEqual(12);
+
+      // §12.7: each of these scripts defaults an absent `INPUTS_MODE` so the
+      // script commits could land before the composition commit, but no
+      // workflow relies on that default. An omitted `mode:` on the build
+      // block's `ralph-seed` would default to `archive` and file away the very
+      // plan the block was about to build.
+      expect(
+        nodes
+          .filter(({ node }) => typeof withOf(node)["mode"] !== "string")
           .map(({ at }) => at),
       ).toEqual([]);
     });
