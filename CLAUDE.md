@@ -17,7 +17,7 @@ in the projects that install it.
 | Path | Contents |
 |---|---|
 | `bin/cli.ts` | The `init` installer. Copies `template/` into `<dir>/.archon/`. |
-| `template/workflows/` | `ralph-wiggum.yaml` — the workflow definition. |
+| `template/workflows/` | `ralph-wiggum.yaml` composes `ralph-plan.yaml`, `ralph-build.yaml` and `ralph-review.yaml` with `include:`. |
 | `template/commands/` | The loop prompts Archon reads through `loop.command`. |
 | `template/scripts/` | Loop-control Bun scripts, sharing `template/scripts/lib/ralph.ts`. |
 | `template/ralph/templates/` | User-editable `IMPLEMENTATION_PLAN.md` and `PROGRESS.md` seeds. |
