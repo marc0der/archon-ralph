@@ -667,3 +667,169 @@ prose. Plan items that edit a prompt carry a `grep -c` criterion on a phrase the
 - **Per-phase models.** When node-level `model:` on loop nodes lands upstream, `plan` and `review`
   on a stronger model than `build` recovers the cheap-builder half of ralph's contract without a
   fork.
+
+## 12. Addendum: phase workflows and composition
+
+Settled on 2026-09-18, after a review of the implemented branch against ralph `36e8c8b` and
+against this spec. Sections 1 to 11 stand except where this section says otherwise. The review
+found the branch complete against §3 to §9: every node, script contract, template, prompt
+substitution, CLI change and test is present, `bun run verify` passes, and the prompts and
+templates are byte-identical to ralph's apart from the §6 substitutions. What follows is the parity
+gap against ralph the review found, the decisions that close it, and four corrections to the text.
+
+### 12.1 Corrections to the text above
+
+- **§2 and §6, the Archon source.** The §6 decision records that Archon's source tree was absent.
+  It is present at `/home/marco/src/oss/Archon` (`marc0der/Archon`, `upstream` =
+  `coleam00/Archon`, `v0.10.1` plus fork commits). Checked there on 2026-09-18: a loop's command
+  prompt passes through both `substituteWorkflowVariables` and `substituteNodeOutputRefs`
+  (`dag-executor.ts`, the loop iteration's "Build prompt" block), so `$ARGUMENTS` in
+  `ralph-plan.md` is substituted and `$seed.output.root` would have been too. The `pwd` anchor
+  stays: it is correct and needs no run-time fact.
+- **§4.2 `ralph-build-cap`, step 4.** A `git push -u origin <branch>` retry that itself fails is a
+  rejection: `abort.txt`, the outcome row, exit 0. Ralph reaches the same outcome through `set -e`.
+  The spec text listed only the first push's rejection.
+- **§4.3 and `ralph-guard.ts`.** The guard's comment says `ralph-seed` archives `abort.txt` with
+  the rest of the cycle. It does not: the marker lives in `ARTIFACTS_DIR`, which belongs to the run,
+  and `ralph-seed` moves only the two plan artifacts. The comment is corrected; behaviour is
+  unchanged.
+- **§7, the README.** §3.2 makes `maxBudgetUsd` the money bound the operator sets and the README
+  never names it. The README gains a sentence beside `cycle_cap` saying the cycle node's
+  `maxBudgetUsd` is the cost bound, that `50` is a placeholder, and that exceeding it fails the run.
+
+### 12.2 Resume
+
+**Finding.** `seed` declares `always_run: true`. Archon re-executes an `always_run` node on
+`workflow resume` and invalidates the cached output of every dependent
+(`dag-executor.ts`, `node_always_run_reset` and `node_prior_cache_invalidated`). A resume after a
+failed guard therefore archives the plan the run was resuming, scaffolds an empty one and replans,
+and then fails again on the `abort.txt` still present in the run's artifacts directory. Ralph's
+`RESUME_FLOOR` exists to prevent exactly the first half of that.
+
+**Decision.** Resume is unsupported and a mistaken one is made harmless.
+
+- `seed` drops `always_run`. On a resume its cached output is reused and the live plan is left
+  alone. The §2 rule "every exec node whose value is a side effect declares `always_run`" gains its
+  one exception: a side effect that must not repeat within a run does not.
+- Nothing clears `abort.txt`, so a mistaken resume still fails at the same guard with the same
+  marker. That is the intended outcome: fail fast, plan intact.
+- The README states the policy: a failed run is re-run from scratch. Archive-first means the
+  previous plan is under `.ralph/<timestamp>/`, and the commits it produced are in git.
+- A resume that re-enters the lifecycle at the failed phase joins §11 as a follow-up. It needs the
+  guard to consume the marker and the report to read the abort from `outcome.log`, and it depends
+  on Archon resuming a `loop_group` mid-iteration, which was not verified.
+
+### 12.3 Phase workflows
+
+**Finding.** Ralph runs `plan`, `build` and `review` as separate commands, and its README's
+supervised first cycle (plan, read the plan, build once, review, tune the prompts) depends on them.
+archon-ralph had one entry point, the full lifecycle, and it archives first, so "review the plan I
+have" and "finish building this plan" could not be expressed.
+
+**Decision.** Three phase workflows, each runnable on its own, and `ralph-wiggum` composes them
+with Archon's `include:`.
+
+| Workflow | Runs | Goal |
+|---|---|---|
+| `ralph-plan` | precondition → init → plan snapshot → plan loop → report | `$ARGUMENTS`, required |
+| `ralph-build` | precondition → init → counts → build snapshot → build loop → guard → report | none |
+| `ralph-review` | precondition → init → counts → review snapshot → review loop → guard → report | none |
+| `ralph-wiggum` | precondition → seed → `include: ralph-plan` → `loop_group{ include: ralph-build → include: ralph-review }` → report | `$ARGUMENTS`, required |
+
+The blocks keep the node contracts of §3 and §4 unchanged: the counts nodes, the `when:` guards,
+the snapshots, the cap scripts and the guards move into the block that owns them. What is new is
+listed here.
+
+**Why `include:`.** `include:` inlines the target's nodes into the composing run at load time
+(`include-expander.ts`). It is upstream since `v0.10.1`, it is legal inside a `loop_group` body,
+and the inlined nodes run in the same run, so they share `ARTIFACTS_DIR`: `outcome.log`,
+`settings.json`, the counters and `abort.txt` keep working with no change. The alternative,
+`workflow:`, spawns a governed child run with its own artifacts directory, which would have cut the
+report and the cycle cap off from the phase results. Inlined node ids are namespaced
+`<include-id>__<node-id>` (`build__guard`); `depends_on: [<include-id>]` waits on every sink of
+the block, and the include's own `depends_on` and `trigger_rule` attach to the block's entry nodes.
+
+**Goal.** An included command prompt may reference `$ARGUMENTS`; the expander polices only
+`$<node>.output` references. `ralph-plan.md` keeps `$ARGUMENTS`, so `archon workflow run
+ralph-plan "<goal>"` and the same text as the `ralph-wiggum` goal need no wiring. `ralph-build.md`
+and `ralph-review.md` reference no goal, so none reaches them, and `ralph-wiggum` passes none. The
+build and review preconditions neither require nor refuse a positional message: inside
+`ralph-wiggum` it is the parent's goal, and refusing it would refuse every composed run.
+
+**Lifecycle shape.** Unchanged from §3.2: build to exhaustion, then review, repeated until a review
+files nothing or `cycle_cap` is reached. The build after review is the next cycle's build. A run
+stopped by the cap ends after a review whose findings are unbuilt; a trailing build block was
+considered and declined, so that the cap means what it says. Ralph's fixed six phases were also
+declined: the fixpoint decision of 2026-09-17 stands.
+
+**Unmet predicates in a standalone run.** Ralph hard-stops a `build` with no open items and a
+`review` with nothing shipped or with open items. The blocks skip and report instead, exactly as
+the lifecycle does: the block's `when:` guard is false, the loop is skipped, the guard and the
+report run under `trigger_rule: all_done`, and the report row says `skipped — <reason>`. One rule
+for both entry points, and a standalone run that has nothing to do exits 0 with a report.
+
+**Inputs.** `ralph-build` declares `skip_push`; `ralph-wiggum` declares `skip_push` and
+`cycle_cap` and passes the first through `with: {skip_push: "$INPUTS.skip_push"}`, which forwards
+the logical boolean. A block node that needs an input declares `with: {<name>: "$INPUTS.<name>"}`
+on itself: composed, the expander substitutes the caller's value at load time; standalone, the
+reference resolves at run time from the workflow input. This is the one mechanism the
+implementation verifies first, with `archon workflow run ralph-wiggum "<goal>" --dry-run`, before
+building on it.
+
+### 12.4 Script changes
+
+- **`ralph-precondition`** reads `INPUTS_MODE` (`with: {mode: plan|build|review}`). `plan`
+  requires a goal as §4.2 states; `build` and `review` do not check `ARGUMENTS` at all. Every mode
+  checks the work tree, the branch and the tools. `ralph-wiggum` runs it in `plan` mode before
+  `seed`, so a goalless run stops before anything is archived; the included plan block runs it
+  again, which is cheap and keeps the block self-contained.
+- **`ralph-seed`** gains a mode. `archive` is today's behaviour, used by `ralph-wiggum` alone.
+  `init`, used by every block, is `ralph init`: scaffold each artifact **only when absent**, create
+  `specs/`, maintain `.gitignore`, write `run-start.txt` only when absent, and **merge** its inputs
+  into `settings.json` rather than overwrite it, because inside `ralph-wiggum` the file already
+  holds `cycle_cap` from `seed` and the build block adds `skip_push` to it. `init` writes no
+  `outcome.log` row. Composed, `init` finds everything in place and does nothing; standalone, it is
+  what lets `ralph-plan` run on a fresh checkout and `ralph-build` run on the plan in the tree.
+- **`readSettings`** is unchanged; its per-field fallback already tolerates a file that holds one
+  key.
+- **`ralph-report`** reads `INPUTS_MODE`. `auto` (the default, used by `ralph-wiggum`) prints the
+  §4.2 summary. `plan` prints the plan row and the plan counts. `build` prints the last `build:`
+  row, the plan counts and the repositories that moved. `review` prints the last `review:` row and
+  the plan counts. Inside `ralph-wiggum` the block reports run too and print those interim lines;
+  the top-level report is the summary. `ralph-counts`, `ralph-snapshot`, the four cap scripts and
+  `ralph-guard` are unchanged.
+- **Report on every exit path.** `ralph-wiggum`'s `report` depends on `precondition`, `seed`,
+  `plan` and `cycle` with `trigger_rule: all_done`, so a failed precondition, seed or plan still
+  prints the summary with `not reached` rows, as ralph's `auto_report` prints on every exit. The
+  block reports carry `trigger_rule: all_done` for the same reason.
+
+### 12.5 Files, CLI, README, tests
+
+- `template/workflows/` holds `ralph-wiggum.yaml`, `ralph-plan.yaml`, `ralph-build.yaml` and
+  `ralph-review.yaml`. The names mirror ralph's commands; the `.archon/commands/` files of the same
+  stem are a different namespace and stay as they are.
+- `package.json` version becomes `0.3.0`. `init` copies the three new files like any other.
+- README: the four workflows and when to run each; a **Supervised first cycle** section adapted
+  from ralph's "Before you hand it a whole feature" (`ralph-plan`, read the plan, `ralph-build`
+  with `--input skip_push=true`, read the commit, `ralph-review`, tune the prompts, then
+  `ralph-wiggum`); the resume policy of §12.2; `archon workflow run ... --dry-run` as the
+  equivalent of `ralph auto --dry-run`, noting it simulates the DAG and runs nothing; the
+  `maxBudgetUsd` sentence of §12.1.
+- Tests, extending §9: the workflow structure test runs over all four files; every `include:`
+  names a file under `template/workflows/`; every `with:` key on an include names an input the
+  target declares; the composed `ralph-wiggum` declares no `always_run` on `seed`;
+  `ralph-precondition` passes a blank `ARGUMENTS` in `build` and `review` mode and fails it in
+  `plan` mode; `ralph-seed` in `init` mode leaves an existing plan untouched, scaffolds a missing
+  one, and merges `skip_push` into a `settings.json` that already holds `cycle_cap`;
+  `ralph-report` renders each of the four modes from fixture files; the block reports render
+  `skipped — no open items` and `skipped — no shipped items to audit` from a log with no phase row.
+  Every test stays inside `withTempRepo`.
+
+### 12.6 Out of scope, added to §10
+
+- A `clean` equivalent. Deleting the two artifacts without archiving is `rm`, and the README does
+  not need to say so.
+- A trailing build after the cycle cap (§12.3).
+- A resume that re-enters the lifecycle (§12.2); it is a §11 follow-up.
+- A `ralph-cycle` workflow of build, review, build with no fixpoint. The operator chains
+  `ralph-build`, `ralph-review` and `ralph-build` by hand, as ralph's README does.
