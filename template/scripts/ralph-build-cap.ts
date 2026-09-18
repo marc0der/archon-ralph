@@ -136,9 +136,12 @@ export function pushWorkspace(artifactsDir: string, git = gitRun): boolean {
   let result = git(["push", "origin", branch]);
   if (!result.ok && result.output.includes("has no upstream branch")) {
     console.log("No upstream branch found. Setting upstream...");
-    // A retry that also fails is a rejection, unlike ralph, which ignores its
-    // exit status. Swallowing it would push nothing for the rest of the phase
-    // and report a clean run.
+    // A retry that also fails is a rejection, and gets what the first push's
+    // rejection gets: `abort.txt`, the outcome row, exit 0. Ralph reaches the
+    // same outcome through `set -e` — its retry is a bare command, so a
+    // failure ends the run where it happens rather than at a guard. Swallowing
+    // it here would push nothing for the rest of the phase and report a clean
+    // run.
     result = git(["push", "-u", "origin", branch]);
   }
   if (result.ok) return false;
