@@ -218,6 +218,30 @@ describe("the workflow definition", () => {
     });
   });
 
+  test("seed declares no always_run", async () => {
+    await withTempRepo(() => {
+      const seed = byId.get("seed");
+      expect(seed).toBeDefined();
+      // §12.2: `always_run` is a resume-cache opt-out, and a resume re-executes
+      // the node and invalidates every dependent's cached output. On `seed`
+      // that archives the plan the resume was resuming and replans from an
+      // empty one, so the archive-and-scaffold side effect opts back in.
+      expect({ id: "seed", always_run: seed?.node["always_run"] }).toEqual({
+        id: "seed",
+        always_run: undefined,
+      });
+
+      // The exception is `seed` alone: every other side-effecting exec node
+      // still declares it, so this is a considered omission and not a lost key.
+      const optedOut = placed
+        .filter((entry) => typeof entry.node["script"] === "string")
+        .filter((entry) => entry.node["always_run"] !== true)
+        .map((entry) => entry.id)
+        .sort();
+      expect(optedOut).toEqual(["precondition", "seed"]);
+    });
+  });
+
   test("every script names a file under template/scripts/", async () => {
     await withTempRepo(() => {
       const scripts = placed.flatMap((entry) => {
