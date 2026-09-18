@@ -833,3 +833,60 @@ building on it.
 - A resume that re-enters the lifecycle (§12.2); it is a §11 follow-up.
 - A `ralph-cycle` workflow of build, review, build with no fixpoint. The operator chains
   `ralph-build`, `ralph-review` and `ralph-build` by hand, as ralph's README does.
+
+### 12.7 Composition facts settled while planning
+
+Checked in `/home/marco/src/oss/Archon` at `77005120` on 2026-09-18, after §12.3 was settled.
+Nothing here reopens §12.3; each bullet is a fact the expander imposes and the decision it forces.
+
+- **Node-affecting workflow fields travel; run-owned ones are dropped.** `include-expander.ts`
+  (`NODE_AFFECTING_WORKFLOW_FIELDS`, `collapseWorkflowScope`) writes an included file's
+  `provider`, `model`, `effort`, `fallbackModel`, `betas`, `sandbox` and `persist_sessions` onto
+  that file's own nodes before inlining them, and the executor reads the node value first. A
+  composed `ralph-wiggum` run therefore executes the plan, build and review nodes under the
+  **phase file's** `sandbox:`, not its own. `worktree:` is run-owned: it is dropped with an
+  `include.workflow_level_fields_dropped` warning and the composing run's value applies.
+  **Decision.** The four workflow files carry the same `provider`, `model`, `worktree` and
+  `sandbox` blocks; a test asserts that they agree; and the README's sandbox section says the
+  boundary is declared in all four files, so extending it means editing all four.
+- **`kind:` is inferred and `always_run` is not read.** A node carrying `include:` parses as an
+  `IncludeDirective` from that key alone (`schemas/dag-node.ts`), and the loader drops and warns
+  about `always_run`, `output_type` and `idle_timeout` on it. An include node declares the
+  structural fields only: `id`, `include`, `depends_on` and `with`. `include:` names a workflow
+  **name** resolved from the discovered map, and an unresolvable target drops the composing
+  workflow at load time — which is why a test asserts every target exists.
+- **An absent `INPUTS_MODE`.** `ralph-snapshot` already fails an unrecognised mode. A default is
+  what lets the three script commits land before the composition commit, so `ralph-precondition`
+  defaults to `plan`, `ralph-seed` defaults to `archive` and `ralph-report` defaults to `auto`,
+  and `ralph-wiggum.yaml` keeps working at every commit in between. No workflow relies on a
+  default: a test asserts every `ralph-precondition`, `ralph-seed`, `ralph-snapshot` and
+  `ralph-report` node declares `with: {mode: …}`. An **unrecognised** value is a different
+  case and fails, as `ralph-snapshot` fails it: a typo in `with: {mode: …}` on the build
+  block's `ralph-seed` node would otherwise default to `archive` and file away the plan the block
+  was about to build.
+- **A workflow file needs `name:` and `description:`.** `schemas/workflow.ts` requires both as
+  non-empty strings, and `include:` resolves its target through the discovered map keyed by
+  `name:`. Each of the three phase files therefore declares `name:` equal to its own stem and a
+  `description:` in the `Use when / Triggers / Does / NOT for` shape `ralph-wiggum.yaml` uses.
+- **A node's `with:` merges over the run's inputs; it does not replace them.** `inputEnvVars`
+  (`dag-executor.ts`) builds the `INPUTS_*` bag from the run's inputs, then the node's composed
+  inputs, then the node's own `with:`, each layer overwriting only the keys it names. A top-level
+  run's declared inputs reach every exec node (`defaultRunInputs`, and `--input` stamped onto
+  `metadata.inputs`), so adding `with: {mode: archive}` to `ralph-wiggum.yaml`'s `seed` leaves
+  `INPUTS_SKIP_PUSH` and `INPUTS_CYCLE_CAP` in its environment and `settings.json` unchanged.
+- **`always_run` in the blocks.** The §2 rule applies unchanged to the block nodes: `init`,
+  `counts`, `snapshot`, `guard` and `report` declare `always_run: true`, and `precondition` writes
+  nothing and declares none. §12.2's exception stays `seed`-only. A `loop_group` body re-executes
+  every iteration whichever way the flag is set (`dag-executor.ts` builds a per-iteration scoped
+  `nodeOutputs`); the flag is the resume-cache opt-out §2 describes, nothing more.
+- **The structure test's existence checks.** `ralph-plan.yaml` declares no `loop_group`, no `when:`
+  and no node named `build`, so the §9 assertions that something exists become totals over the
+  four files, and the `seed`, `build` and `review` assertions stay scoped to `ralph-wiggum.yaml`.
+- **The `--dry-run` check is the operator's, not the loop's.** §12.3 asks the implementation to
+  verify `with: {<name>: "$INPUTS.<name>"}` with `archon workflow run ralph-wiggum "<goal>"
+  --dry-run` before building on it. Checked on 2026-09-18: the `archon` on `PATH` is a symlink to
+  a Nix-built binary whose ELF interpreter does not resolve inside the loop's sandbox, so no plan
+  item can run that command non-interactively. **Decision.** The dry run is an acceptance
+  criterion the operator runs once by hand, after the composition commit. Inside the suite the
+  load is carried by the structure tests of §12.5: every `include:` names a workflow file under
+  `template/workflows/`, and every `with:` key on an include names an input the target declares.
