@@ -16,8 +16,11 @@
  * there is no marker and it exits 0, which is also the ordinary outcome.
  *
  * The marker is never cleared here. `ralph-report` reads the same file to print
- * its `failed — <first line>` row, and `ralph-seed` archives it with the rest
- * of the cycle on the next run, so an abort stays visible after the run ends.
+ * its `failed — <first line>` row, and nothing else touches it. The marker
+ * lives in `ARTIFACTS_DIR`, which belongs to the run, while `ralph-seed` moves
+ * only the two plan artifacts in the checkout — so an abort stays readable for
+ * as long as Archon keeps the run's artifacts, and a mistaken `workflow resume`
+ * fails at this guard again on the same marker (§12.2).
  *
  * Invoked by Archon as a named script (`runtime: bun`); no args, no stdin, and
  * `ARTIFACTS_DIR` says where the marker would be.
