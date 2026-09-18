@@ -1,0 +1,99 @@
+name: ralph-plan
+description: |
+  Use when: User wants only the PLAN phase of the Ralph Wiggum lifecycle — write
+            or rewrite IMPLEMENTATION_PLAN.md for a goal, and build nothing.
+  Triggers: "ralph plan", "plan this", "write me an implementation plan".
+  Does: Scaffolds IMPLEMENTATION_PLAN.md and PROGRESS.md when they are absent,
+        then runs the PLAN loop to convergence — each iteration analyses the
+        specs and the code with a fresh context and rewrites the plan, stopping
+        on an unchanged plan fingerprint or at ralph's cap of 6 passes. Ends
+        with the plan row and the plan counts. Archives nothing and commits
+        nothing.
+  NOT for: Implementing the plan (ralph-build), auditing it (ralph-review), or
+           the whole lifecycle (ralph-wiggum).
+
+# The goal is the positional message: `archon workflow run ralph-plan "<goal>"`.
+# It reaches the prompt as $ARGUMENTS and `ralph-precondition` requires it.
+#
+# This file is both a standalone workflow and the block `ralph-wiggum` inlines
+# with `include: ralph-plan`. Archon writes an included file's provider, model
+# and sandbox onto its own nodes before inlining them, so these blocks govern
+# the plan phase in a composed run too: they match `ralph-wiggum.yaml` and must
+# stay matched. `worktree:` is run-owned and dropped when composed.
+provider: claude
+model: opus
+
+worktree:
+  enabled: false
+
+# The boundary for a run Archon executes with permissions bypassed. Writes stay
+# allowed outside the denials below, because a nested repository may sit
+# anywhere; extend the domain allowlist with your own git host and registries.
+sandbox:
+  enabled: true
+  autoAllowBashIfSandboxed: true
+  filesystem:
+    denyWrite: ["~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gh", "~/.archon/config.yaml"]
+  network:
+    allowedDomains: ["github.com", "api.github.com", "registry.npmjs.org", "bun.sh"]
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════════════
+  # PRECONDITION — fail fast on a goalless run, a detached HEAD, a
+  # non-repository or a missing tool. It writes nothing, so a resume may
+  # reuse its verdict. `plan` mode is the one that requires the goal.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: precondition
+    script: ralph-precondition
+    runtime: bun
+    with: { mode: plan }
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # INIT — `ralph init` and nothing more: scaffold each artifact only when
+  # absent, create specs/, maintain .gitignore, and record the run's start
+  # once. It archives nothing, so a plan already in the tree is rewritten
+  # in place rather than filed away. Composed, it finds everything in place
+  # and does nothing.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: init
+    depends_on: [precondition]
+    script: ralph-seed
+    runtime: bun
+    with: { mode: init }
+    always_run: true
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # PLAN — analyse specs + code, write IMPLEMENTATION_PLAN.md. The snapshot
+  # records the plan fingerprint the cap compares against; the cap stops on
+  # an unchanged fingerprint or at ralph's cap of 6 passes, both graceful.
+  # max_iterations is a safety ceiling above the cap, never the bound.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: snapshot
+    depends_on: [init]
+    script: ralph-snapshot
+    runtime: bun
+    with: { mode: plan }
+    always_run: true
+
+  - id: plan
+    depends_on: [snapshot]
+    idle_timeout: 600000
+    loop:
+      command: ralph-plan
+      max_iterations: 7
+      fresh_context: true
+      until_bash: bun run .archon/scripts/ralph-plan-cap.ts "$ARTIFACTS_DIR"
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # REPORT — the plan row and the plan counts, from outcome.log and the
+  # plan. The join rule is what makes it print on every exit path: a failed
+  # precondition, init or plan loop still reports. Read-only, and exits 0
+  # even after an abort — the phase that failed already failed the run.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: report
+    depends_on: [precondition, init, snapshot, plan]
+    trigger_rule: all_done
+    script: ralph-report
+    runtime: bun
+    with: { mode: plan }
+    always_run: true
