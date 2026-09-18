@@ -50,8 +50,8 @@ inputs:
 nodes:
   # ═══════════════════════════════════════════════════════════════════════
   # PRECONDITION — fail fast on a goalless run, a detached HEAD, a
-  # non-repository or a missing tool. The only node with no always_run: it
-  # writes nothing, so a resume may reuse its verdict.
+  # non-repository or a missing tool. It writes nothing, so a resume may
+  # reuse its verdict.
   # ═══════════════════════════════════════════════════════════════════════
   - id: precondition
     script: ralph-precondition
@@ -61,12 +61,16 @@ nodes:
   # SEED — archive the previous cycle, scaffold the artifacts from
   # .archon/ralph/templates/, ignore them, and record the run's settings and
   # starting repository state (`ralph archive` + `ralph init`).
+  #
+  # The one exception to the always_run rule: archiving must not repeat
+  # within a run, so a resume reuses the cached output and leaves the live
+  # plan alone (ralph's RESUME_FLOOR). Resume is unsupported either way —
+  # abort.txt survives, so a mistaken one fails at the same guard.
   # ═══════════════════════════════════════════════════════════════════════
   - id: seed
     depends_on: [precondition]
     script: ralph-seed
     runtime: bun
-    always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
   # PLAN — analyse specs + code, write IMPLEMENTATION_PLAN.md. The snapshot
