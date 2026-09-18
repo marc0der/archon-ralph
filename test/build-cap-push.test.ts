@@ -207,7 +207,7 @@ describe("ralph-build-cap push", () => {
 
       const { code } = runMain(artifactsDir);
       // Exit 0 completes the loop — `until_bash` cannot fail a node (§4.3), so
-      // `build-guard` reads the marker and fails the run instead.
+      // `guard` reads the marker and fails the run instead.
       expect(code).toBe(0);
       const abort = readFileSync(join(artifactsDir, "abort.txt"), "utf8");
       expect(abort.split("\n")[0]).toBe("build: push rejected");
