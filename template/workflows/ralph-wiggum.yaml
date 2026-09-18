@@ -119,8 +119,12 @@ nodes:
   # `when:` guard, snapshot, cap script and guard, so a build with nothing
   # open and a review with nothing shipped skip and report exactly as they
   # do standalone. `review` depends on `build`, which waits on every sink of
-  # the build block — its guard included, so a rejected push stops the cycle
-  # before the audit.
+  # the build block, and `report` is that block's only sink — `guard`
+  # precedes it, as every other node does. `report` declares
+  # `trigger_rule: all_done` and so always completes, whatever the guard
+  # exited with. A rejected push therefore does not stop the cycle before the
+  # audit: the review block runs, and its own `guard` reads the same
+  # abort.txt and fails the run again.
   # ═══════════════════════════════════════════════════════════════════════
   - id: cycle
     depends_on: [plan]
