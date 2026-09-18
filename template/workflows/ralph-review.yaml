@@ -1,0 +1,115 @@
+name: ralph-review
+description: |
+  Use when: User wants only the REVIEW phase of the Ralph Wiggum lifecycle —
+            audit the items IMPLEMENTATION_PLAN.md records as shipped, and
+            build nothing.
+  Triggers: "ralph review", "review the plan", "audit what ralph shipped".
+  Does: Audits the shipped items against the specs and the code with a fresh
+        context per pass, files each finding as a new plan item, and stops on a
+        pass that files nothing or at ralph's cap of 6 passes. Ends with the
+        review row and the plan counts. Implements nothing, commits nothing
+        and pushes nothing. A plan with open items or nothing shipped is
+        skipped and reported, not an error.
+  NOT for: Writing the plan (ralph-plan), implementing it (ralph-build), or the
+           whole lifecycle (ralph-wiggum).
+
+# No goal: the plan in the tree is the input. A positional message is neither
+# required nor refused — composed, it is `ralph-wiggum`'s goal.
+#
+# This file is both a standalone workflow and the block `ralph-wiggum` inlines
+# with `include: ralph-review`. Archon writes an included file's provider, model
+# and sandbox onto its own nodes before inlining them, so these blocks govern
+# the review phase in a composed run too: they match `ralph-wiggum.yaml` and
+# must stay matched. `worktree:` is run-owned and dropped when composed.
+provider: claude
+model: opus
+
+worktree:
+  enabled: false
+
+# The boundary for a run Archon executes with permissions bypassed. Writes stay
+# allowed outside the denials below, because a nested repository may sit
+# anywhere; extend the domain allowlist with your own git host and registries.
+sandbox:
+  enabled: true
+  autoAllowBashIfSandboxed: true
+  filesystem:
+    denyWrite: ["~/.ssh", "~/.gnupg", "~/.aws", "~/.config/gh", "~/.archon/config.yaml"]
+  network:
+    allowedDomains: ["github.com", "api.github.com", "registry.npmjs.org", "bun.sh"]
+
+nodes:
+  # ═══════════════════════════════════════════════════════════════════════
+  # PRECONDITION — fail fast on a detached HEAD, a non-repository or a
+  # missing tool. It writes nothing, so a resume may reuse its verdict.
+  # `review` mode checks the work tree and the tools but never the goal.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: precondition
+    script: ralph-precondition
+    runtime: bun
+    with: { mode: review }
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # INIT — `ralph init` and nothing more: scaffold each artifact only when
+  # absent, create specs/, maintain .gitignore, and record the run's start
+  # once. It archives nothing, so the plan this block is about to audit
+  # survives. Composed, it finds everything in place and does nothing.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: init
+    depends_on: [precondition]
+    script: ralph-seed
+    runtime: bun
+    with: { mode: init }
+    always_run: true
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # REVIEW — audit the shipped items and file findings as new plan items.
+  # Guarded on a plan with nothing open and something shipped, so a plan
+  # still being built is left to a build rather than audited half-done. The
+  # cap aborts a pass that un-ticks an item; the guard fails the run on it.
+  # The join rule on the guard is what lets it run after a loop that was
+  # skipped as well as after one that ran.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: counts
+    depends_on: [init]
+    script: ralph-counts
+    runtime: bun
+    always_run: true
+
+  - id: snapshot
+    depends_on: [counts]
+    when: "$counts.output.open == 0 && $counts.output.shipped > 0"
+    script: ralph-snapshot
+    runtime: bun
+    with: { mode: review }
+    always_run: true
+
+  - id: review
+    depends_on: [snapshot]
+    idle_timeout: 600000
+    loop:
+      command: ralph-review
+      max_iterations: 7
+      fresh_context: true
+      until_bash: bun run .archon/scripts/ralph-review-cap.ts "$ARTIFACTS_DIR"
+
+  - id: guard
+    depends_on: [review]
+    trigger_rule: all_done
+    script: ralph-guard
+    runtime: bun
+    always_run: true
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # REPORT — the review row and the plan counts, from outcome.log and the
+  # plan. The join rule is what makes it print on every exit path: a failed
+  # precondition, init or review loop still reports. Read-only, and exits 0
+  # even after an abort — the guard already failed the run.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: report
+    depends_on: [precondition, init, counts, snapshot, review, guard]
+    trigger_rule: all_done
+    script: ralph-report
+    runtime: bun
+    with: { mode: review }
+    always_run: true
