@@ -14,6 +14,12 @@
  * no `when:` and no `loop_group`, so the §9 assertions that something *exists*
  * become totals over the files, and the assertions naming `seed`, `build` and
  * `review` stay scoped to the one file that declares those ids.
+ *
+ * §12.5 adds the include contract, which fails one step earlier than the rest.
+ * An unresolvable `include:` target, or a `with:` key naming an input its
+ * target never declares, is caught by the loader rather than the executor: the
+ * composing workflow is dropped, so the lifecycle does not run short — it does
+ * not run at all.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -106,6 +112,19 @@ function parse(file: string): Parsed {
   const placed = place(topLevel);
   const byId = new Map(placed.map((entry) => [entry.id, entry]));
   return { file, workflow, topLevel, placed, byId };
+}
+
+/** The `name:` a workflow declares: how an `include:` in another file finds it. */
+function nameOf(entry: Parsed): string {
+  const name = isYaml(entry.workflow) ? entry.workflow["name"] : undefined;
+  return typeof name === "string" ? name : "";
+}
+
+/** The input names a workflow declares: what a `with:` key on it may name. */
+function inputsOf(entry: Parsed | undefined): string[] {
+  const workflow = entry?.workflow;
+  const inputs = isYaml(workflow) ? workflow["inputs"] : undefined;
+  return isYaml(inputs) ? Object.keys(inputs) : [];
 }
 
 const parsed = readdirSync(WORKFLOWS)
@@ -342,6 +361,65 @@ describe("the workflow definitions", () => {
         commands
           .filter(({ command }) => !existsSync(resolve("commands", command, ".md")))
           .map(({ file, id, command }) => `${file}: ${id} → ${command}`),
+      ).toEqual([]);
+    });
+  });
+
+  test("every include names a workflow file and a declared input", async () => {
+    await withTempRepo(() => {
+      const byName = new Map(parsed.map((entry) => [nameOf(entry), entry]));
+
+      const includes = parsed.flatMap(({ file, placed }) =>
+        placed.flatMap((entry) => {
+          const target = entry.node["include"];
+          return typeof target === "string"
+            ? [{ at: `${file}: ${entry.id}`, node: entry.node, target }]
+            : [];
+        }),
+      );
+
+      // §12.3 composes the lifecycle from three blocks. An inlined phase that
+      // reverted to a copied node list would leave this list short and the
+      // assertions below auditing something other than the composition.
+      expect(includes.length).toBeGreaterThanOrEqual(3);
+
+      // §12.7: `include:` names a workflow *name* resolved from the discovered
+      // map, and an unresolvable target drops the composing workflow at load
+      // time. A typo here is not a skipped node, as a stale `depends_on` is —
+      // it is no lifecycle at all, so nothing runs and nothing reports.
+      expect(
+        includes
+          .filter(({ target }) => !byName.has(target))
+          .map(({ at, target }) => `${at} → ${target}`),
+      ).toEqual([]);
+
+      const wiring = includes.flatMap(({ at, node, target }) => {
+        const declared = node["with"];
+        return (isYaml(declared) ? Object.keys(declared) : []).map((key) => ({ at, target, key }));
+      });
+
+      // `with: {<name>: "$INPUTS.<name>"}` is the one mechanism §12.3 passes an
+      // input through, so the check is vacuous unless some include uses it.
+      expect(wiring.length).toBeGreaterThan(0);
+      expect(
+        wiring
+          .filter(({ target, key }) => !inputsOf(byName.get(target)).includes(key))
+          .map(({ at, target, key }) => `${at} → ${target}.${key}`),
+      ).toEqual([]);
+
+      // §12.7: a node carrying `include:` parses as an `IncludeDirective` from
+      // that key alone, and the loader drops and warns about `always_run` and
+      // friends on it. An include declares `id`, `include`, `depends_on` and
+      // `with` only; a `script` or a `loop` beside them is silently ignored.
+      expect(
+        includes
+          .filter(
+            ({ node }) =>
+              node["always_run"] !== undefined ||
+              node["script"] !== undefined ||
+              loopOf(node) !== null,
+          )
+          .map(({ at }) => at),
       ).toEqual([]);
     });
   });
