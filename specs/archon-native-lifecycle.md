@@ -895,4 +895,4 @@ Nothing here reopens §12.3; each bullet is a fact the expander imposes and the 
 
 Moved to `specs/spec-anchored-review.md` on 2026-09-22, so the change could be reviewed on its
 own. That spec re-anchors the review phase on `specs/`, moves the baseline from `36e8c8b` to
-`f6d2405`, and amends §§3, 4, 6, 8, 9 and 10 above; its §2 lists every amendment.
+`f6d2405`, and amends the sections its §2 lists.
