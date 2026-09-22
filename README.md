@@ -16,9 +16,9 @@ It drops a self-contained `.archon/` workflow into your repo that:
      fresh context, tests, commits and pushes. It stops when the plan is exhausted, when two
      iterations in a row leave every repository unmoved, or when the budget — the open count plus
      20 % headroom — is spent.
-   - **Review** runs when build left **no** open items and at least one shipped item. Each pass
-     audits the shipped items and files findings as new open items. It stops when a pass changes
-     nothing, or after 6 passes.
+   - **Review** runs when build left **no** open items, at least one shipped item and at least
+     one cited spec. Each pass audits the specs the plan's items cite and files findings as new
+     open items. It stops when a pass changes nothing, or after 6 passes.
 4. **Reports.** A factual summary of every phase, the plan counts and the repositories that moved.
 
 A guard that is false **skips** its phase; a skip is never a failure. Build stopping short skips
@@ -78,7 +78,7 @@ Each phase also runs on its own, like ralph's `plan`, `build` and `review` comma
 |---|---|---|
 | `ralph-plan` | the plan loop: rewrite `IMPLEMENTATION_PLAN.md` from `specs/` and the code | required |
 | `ralph-build` | the build loop: implement the open items, test, commit, push | none |
-| `ralph-review` | the review loop: audit the shipped items, file findings as open items | none |
+| `ralph-review` | the review loop: audit the code against the specs the plan cites, file findings as open items | none |
 | `ralph-wiggum` | plan, then build/review as a `loop_group` to the fixpoint, then report | required |
 
 `ralph-plan` and `ralph-wiggum` **require** the goal, and stop before the first phase without one.
@@ -87,8 +87,9 @@ positional message passed to either is neither required nor refused, because ins
 it is the parent's goal.
 
 A phase workflow that has nothing to do is **skipped and reported**, never an error: `ralph-build`
-on a plan with no open items and `ralph-review` on one with open items or nothing shipped both exit
-0 with a report. That is the same guard the lifecycle uses, so the two entry points behave alike.
+on a plan with no open items and `ralph-review` on one with open items, nothing shipped or no
+cited spec all exit 0 with a report. That is the same guard the lifecycle uses, so the two entry
+points behave alike.
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -127,8 +128,9 @@ Run a cycle yourself first:
 2. `archon workflow run ralph-build --input skip_push=true`, then read the commits. This is what
    tells you whether your `CLAUDE.md` or `AGENTS.md` names the right test command, and
    `skip_push=true` keeps the branch local while you find out.
-3. `archon workflow run ralph-review`, once build has emptied the plan. Findings about style or
-   taste mean the prompts need work, not more iterations.
+3. `archon workflow run ralph-review`, once build has emptied the plan. A `Minor` citing a rule
+   file is the tier working as designed; findings about style or taste with no written rule behind
+   them mean the prompts need work, not more iterations.
 4. Tune the prompts in `.archon/commands/`. Iterate on those, not on the loop.
 
 Each step leaves the plan and the log in the tree for the next one to pick up: the phase workflows
@@ -211,7 +213,7 @@ the supported path rather than as containment.
     ├── ralph-precondition.ts       # refuse a goalless, detached or non-repo run
     ├── ralph-seed.ts               # archive the last cycle, scaffold, ignore
     ├── ralph-snapshot.ts           # reset a phase's counters and fingerprints
-    ├── ralph-counts.ts             # open / shipped / superseded, for the guards
+    ├── ralph-counts.ts             # open / shipped / superseded / cited, for the guards
     ├── ralph-guard.ts              # fail the run on a cap script's abort marker
     ├── ralph-plan-cap.ts           # plan loop: converge or cap
     ├── ralph-build-cap.ts          # build loop: exhaust, noop, budget, push
