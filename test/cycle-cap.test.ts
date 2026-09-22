@@ -21,7 +21,16 @@ import { readCounter, writeCounter } from "../template/scripts/lib/ralph.ts";
 import { withTempRepo } from "./helpers.ts";
 
 /**
- * A plan whose `## Items` body holds `items`.
+ * The citation every seeded item carries (spec-anchored-review §7).
+ *
+ * A fixture standing in for a plan satisfies the contract the plan now
+ * carries, so a later test that starts reading citations finds them here
+ * already. Indented by two spaces, so no marker count moves.
+ */
+const CITATION = "  Spec: `specs/mock.md` §1";
+
+/**
+ * A plan whose `## Items` body holds `items`, each under a `CITATION` line.
  *
  * The `## Entry Format` exemplar is included because it is an open item
  * textually: a fixture without it would pass even if the script counted the
@@ -39,7 +48,7 @@ function writePlan(items: string[]): void {
       "",
       "## Items",
       "",
-      ...items,
+      ...items.flatMap((item) => [item, CITATION]),
       "",
     ].join("\n"),
   );

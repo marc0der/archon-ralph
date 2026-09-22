@@ -50,7 +50,7 @@ function outsideRoot(): string {
 describe("planStateHash", () => {
   test("is stable across two calls with no change", async () => {
     await withTempRepo(() => {
-      writeFileSync("IMPLEMENTATION_PLAN.md", "## Items\n- [ ] **Open**\n");
+      writeFileSync("IMPLEMENTATION_PLAN.md", "## Items\n- [ ] **Open**\n  Spec: `specs/mock.md` §1\n");
       mkdirSync("specs");
       writeFileSync("specs/one.md", "the decision record\n");
 
@@ -60,10 +60,10 @@ describe("planStateHash", () => {
 
   test("changes when the plan changes", async () => {
     await withTempRepo(() => {
-      writeFileSync("IMPLEMENTATION_PLAN.md", "## Items\n- [ ] **Open**\n");
+      writeFileSync("IMPLEMENTATION_PLAN.md", "## Items\n- [ ] **Open**\n  Spec: `specs/mock.md` §1\n");
       const before = planStateHash();
 
-      writeFileSync("IMPLEMENTATION_PLAN.md", "## Items\n- [x] **Open**\n");
+      writeFileSync("IMPLEMENTATION_PLAN.md", "## Items\n- [x] **Open**\n  Spec: `specs/mock.md` §1\n");
 
       expect(planStateHash()).not.toBe(before);
     });
