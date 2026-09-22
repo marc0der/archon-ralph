@@ -4,6 +4,8 @@
  * The two `when:` guards of the cycle body are expressions over this node's
  * stdout, so every test here asserts the parsed object rather than the text:
  * a stray line or a renamed key skips both phases instead of failing the run.
+ * `cited` is the fourth key and the review guard's third term
+ * (spec-anchored-review §4), so it is asserted everywhere the others are.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -68,7 +70,7 @@ function runMain(): { code: number; json: unknown; stderr: string } {
 }
 
 describe("ralph-counts", () => {
-  test("prints the three counts as one JSON object", async () => {
+  test("prints the four counts as one JSON object", async () => {
     await withTempRepo(async () => {
       writePlan([
         "- [ ] **Open one**",
@@ -79,7 +81,12 @@ describe("ralph-counts", () => {
         "- [~] **Superseded three**",
       ]);
 
-      expect(runMain()).toMatchObject({ code: 0, json: { open: 2, shipped: 1, superseded: 3 } });
+      // `cited` is 1, not 6: every item carries the same `CITATION`, and the
+      // anchor set is the distinct paths rather than the citations.
+      expect(runMain()).toMatchObject({
+        code: 0,
+        json: { open: 2, shipped: 1, superseded: 3, cited: 1 },
+      });
     });
   });
 
@@ -88,10 +95,15 @@ describe("ralph-counts", () => {
       writePlan([]);
       // The real checked-in template, not the fixture: its exemplar is the one
       // that ships, and an `open` of 1 here makes the build loop run on an
-      // empty plan and the review phase never run at all.
+      // empty plan and the review phase never run at all. The exemplar cites
+      // `specs/file.md`, so a `cited` of 1 would pass the fourth guard term on
+      // a plan with no items and send review in with nothing to audit.
       copyFileSync(REAL_TEMPLATE, "IMPLEMENTATION_PLAN.md");
 
-      expect(runMain()).toMatchObject({ code: 0, json: { open: 0, shipped: 0, superseded: 0 } });
+      expect(runMain()).toMatchObject({
+        code: 0,
+        json: { open: 0, shipped: 0, superseded: 0, cited: 0 },
+      });
     });
   });
 
@@ -99,7 +111,7 @@ describe("ralph-counts", () => {
     await withTempRepo(async () => {
       writePlan(["  - [ ] **Nested**", "See `- [x]` in the entry format.", "- [ ] **Real**"]);
 
-      expect(counts()).toEqual({ open: 1, shipped: 0, superseded: 0 });
+      expect(counts()).toEqual({ open: 1, shipped: 0, superseded: 0, cited: 1 });
     });
   });
 

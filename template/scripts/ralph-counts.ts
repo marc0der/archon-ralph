@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Ralph COUNTS node — publish the plan's three item counts (spec §4.2).
+ * Ralph COUNTS node — publish the plan's four counts (spec §4.2).
  *
  * Runs before `build` and again before `review`, because both phase guards read
  * `$counts-*.output` and both have to see the plan **as it stands at that
- * moment**: `build` runs on `open > 0`, `review` on `open == 0 && shipped > 0`,
- * and the build loop in between rewrites all three numbers.
+ * moment**: `build` runs on `open > 0`, `review` on
+ * `open == 0 && shipped > 0 && cited > 0`, and the build loop in between
+ * rewrites those numbers.
  *
  * Stdout carries **one JSON object and nothing else**; Archon parses it into
  * the `when:` expressions above, so a diagnostic line here would break a guard
@@ -21,7 +22,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { countItems, planItemsBody } from "./lib/ralph.ts";
+import { citedSpecs, countItems, planItemsBody } from "./lib/ralph.ts";
 
 /** The artifacts both loop phases need in the tree before they start. */
 const REQUIRED = ["IMPLEMENTATION_PLAN.md", "PROGRESS.md"] as const;
@@ -30,11 +31,14 @@ export interface Counts {
   open: number;
   shipped: number;
   superseded: number;
+  /** The size of the review anchor set — a number, never the paths (§3). */
+  cited: number;
 }
 
 /**
  * The counts, read through `planItemsBody` so the exemplar under
- * `## Entry Format` counts as nothing.
+ * `## Entry Format` counts as nothing. The exemplar cites `specs/file.md`, so
+ * `cited` needs that body for the same reason the markers do.
  */
 export function counts(): Counts {
   const body = planItemsBody();
@@ -42,6 +46,7 @@ export function counts(): Counts {
     open: countItems(body, "[ ]"),
     shipped: countItems(body, "[x]"),
     superseded: countItems(body, "[~]"),
+    cited: citedSpecs(body).length,
   };
 }
 
