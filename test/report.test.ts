@@ -99,10 +99,10 @@ describe("ralph-report", () => {
         "seed: archived previous cycle to .ralph/20260917-101500/",
         "plan: converged on pass 3",
         "build: 9 iterations, plan exhausted",
-        "review: converged on pass 2, audited 9 shipped items",
+        "review: converged on pass 2, audited 9 specs",
         "cycle 1: 2 open items remain — starting cycle 2",
         "build: 3 iterations, plan exhausted",
-        "review: converged on pass 1, audited 11 shipped items",
+        "review: converged on pass 1, audited 11 specs",
         "cycle 2: clean — no open items remain",
       ]);
       writePlan(11, 0, 1);
@@ -113,10 +113,10 @@ describe("ralph-report", () => {
         "  plan     ran — converged on pass 3",
         "  cycle 1",
         "    build  ran — 9 iterations, plan exhausted",
-        "    review ran — converged on pass 2, audited 9 shipped items, filed 2 findings",
+        "    review ran — converged on pass 2, audited 9 specs, filed 2 findings",
         "  cycle 2",
         "    build  ran — 3 iterations, plan exhausted",
-        "    review ran — converged on pass 1, audited 11 shipped items, filed 0 findings",
+        "    review ran — converged on pass 1, audited 11 specs, filed 0 findings",
         "  Result: clean after 2 cycles",
         "",
         "Plan: 11 shipped, 0 open, 1 superseded",
@@ -321,7 +321,7 @@ describe("ralph-report modes", () => {
     "seed: archived previous cycle to .ralph/20260917-101500/",
     "plan: converged on pass 3",
     "build: 9 iterations, plan exhausted",
-    "review: converged on pass 2, audited 9 shipped items",
+    "review: converged on pass 2, audited 9 specs",
   ];
 
   /** The `Plan:` row every block report ends on, from `writePlan(7, 2, 1)`. */
@@ -365,7 +365,7 @@ describe("ralph-report modes", () => {
       // No `, filed F findings` clause: the count is read off the `cycle N:`
       // line, which is appended after the review block has already reported.
       expect(ran.stdout).toEqual([
-        "  review   ran — converged on pass 2, audited 9 shipped items",
+        "  review   ran — converged on pass 2, audited 9 specs",
         "",
         PLAN_ROW,
       ]);
@@ -388,7 +388,7 @@ describe("ralph-report modes", () => {
         "  plan     ran — converged on pass 3",
         "  cycle 1",
         "    build  ran — 9 iterations, plan exhausted",
-        "    review ran — converged on pass 2, audited 9 shipped items",
+        "    review ran — converged on pass 2, audited 9 specs",
         "  Result: stopped with open items after 1 cycle",
         "",
         PLAN_ROW,
