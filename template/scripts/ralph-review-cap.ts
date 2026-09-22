@@ -32,6 +32,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   appendOutcome,
+  citedSpecs,
   countItems,
   planItemsBody,
   planStateHash,
@@ -65,11 +66,19 @@ export function main(argv = process.argv): number {
   const n = readCounter(iterFile, 0) + 1;
   writeCounter(iterFile, n);
 
-  // `planItemsBody` and not the whole file: the exemplar under `## Entry Format`
-  // carries no `[x]`, but the count has to come from the same path the snapshot
-  // counted with or the two are not comparable. A plan that is absent throws —
-  // `counts` has already failed the run by then (§4.2).
-  const shipped = countItems(planItemsBody(), "[x]");
+  // One read, two figures. `planItemsBody` and not the whole file: the shipped
+  // count has to come from the same path the snapshot counted with or the two
+  // are not comparable, and the exemplar under `## Entry Format` cites
+  // `specs/file.md`, which the whole file would fold into the anchor set. A
+  // plan that is absent throws — `counts` has already failed the run by then
+  // (§4.2).
+  const body = planItemsBody();
+  const shipped = countItems(body, "[x]");
+  // The size of the anchor set: what this pass swept. Derived rather than taken
+  // from the agent's own `Audited N of M specs.` line, because a clean review
+  // changes no file and is otherwise indistinguishable from a backend that read
+  // the prompt and did nothing (§4).
+  const audited = citedSpecs(body).length;
   // 0 as the fallback, so a missing baseline can never read as a drop: a review
   // whose snapshot did not run must audit, not abort.
   const before = readCounter(join(artifactsDir, "shipped-before.txt"), 0);
@@ -91,7 +100,7 @@ export function main(argv = process.argv): number {
   writeFileSync(hashFile, `${hashAfter}\n`);
 
   if (hashBefore === hashAfter) {
-    appendOutcome(artifactsDir, `review: converged on pass ${n}, audited ${shipped} shipped items`);
+    appendOutcome(artifactsDir, `review: converged on pass ${n}, audited ${audited} specs`);
     return 0;
   }
   // Ralph's `PLAN_DEFAULT_CAP`, spelt out rather than named: the bound and the

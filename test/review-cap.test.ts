@@ -29,13 +29,17 @@ import { withTempRepo } from "./helpers.ts";
 const CITATION = "  Spec: `specs/mock.md` §1";
 
 /**
- * A plan whose `## Items` body holds `items`, each under a `CITATION` line.
+ * A plan whose `## Items` body holds `items`, each under its citation line.
+ *
+ * `citations` is positional and defaults to `CITATION` for every item, so a
+ * test that cares about the anchor set states its own paths and every other
+ * test reads as one spec cited throughout.
  *
  * The `## Entry Format` exemplar is included because the script and
- * `ralph-snapshot` must both count through `planItemsBody`: a test that omits
- * it would pass even if one of them counted the file whole.
+ * `ralph-snapshot` must both read through `planItemsBody`: a test that omits it
+ * would pass even if one of them took the file whole.
  */
-function writePlan(items: string[]): void {
+function writePlan(items: string[], citations: string[] = []): void {
   writeFileSync(
     "IMPLEMENTATION_PLAN.md",
     [
@@ -47,7 +51,7 @@ function writePlan(items: string[]): void {
       "",
       "## Items",
       "",
-      ...items.flatMap((item) => [item, CITATION]),
+      ...items.flatMap((item, i) => [item, citations[i] ?? CITATION]),
       "",
     ].join("\n"),
   );
@@ -125,9 +129,10 @@ describe("ralph-review-cap", () => {
 
       expect(runMain(artifactsDir).code).toBe(0);
       expect(iter(artifactsDir)).toBe(1);
-      // `audited 2`, not 3: `[~]` is not shipped, and the exemplar under
-      // `## Entry Format` is outside the body either way.
-      expect(outcome(artifactsDir)).toEqual(["review: converged on pass 1, audited 2 shipped items"]);
+      // `audited 1`, not 3: the line counts the distinct specs the items cite,
+      // and all three cite `specs/mock.md`. The exemplar under `## Entry
+      // Format` cites `specs/file.md` and is outside the body either way.
+      expect(outcome(artifactsDir)).toEqual(["review: converged on pass 1, audited 1 specs"]);
     });
   });
 
@@ -143,7 +148,22 @@ describe("ralph-review-cap", () => {
       // and not against the snapshot. Without that write-back the review would
       // never converge after filing a single finding.
       expect(runMain(artifactsDir).code).toBe(0);
-      expect(outcome(artifactsDir)).toEqual(["review: converged on pass 2, audited 1 shipped items"]);
+      expect(outcome(artifactsDir)).toEqual(["review: converged on pass 2, audited 1 specs"]);
+    });
+  });
+
+  test("counts the specs the items cite, not the items citing them", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      // Two items, two distinct specs: the one shape that tells the anchor set
+      // apart from the shipped count it replaced, which is 2 here as well.
+      writePlan(
+        ["- [x] **One**", "- [x] **Two**"],
+        ["  Spec: `specs/alpha.md` \u00a71", "  Spec: `specs/beta.md` \u00a72"],
+      );
+      snapshot(artifactsDir, 2);
+
+      expect(runMain(artifactsDir).code).toBe(0);
+      expect(outcome(artifactsDir)).toEqual(["review: converged on pass 1, audited 2 specs"]);
     });
   });
 
