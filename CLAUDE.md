@@ -51,8 +51,8 @@ in a user's project.
 - **Every script is importable.** Guard the entry point with `if (import.meta.main)` and export a
   `main()`, so `test/` can exercise the functions without running the script.
 - **Every count goes through `planItemsBody`.** Counting markers over the whole plan file counts
-  the exemplar under `## Entry Format` as a real item. `planItemsBody` and `countItems` from
-  `template/scripts/lib/ralph.ts` are the only counting path.
+  the exemplar under `## Entry Format` as a real item. `planItemsBody`, `countItems` and
+  `citedSpecs` from `template/scripts/lib/ralph.ts` are the only counting path.
 - **Every test wraps its body in `withTempRepo`.** `test/helpers.ts` mints the temporary
   directory, runs `git init`, sets `ARTIFACTS_DIR`, `chdir`s in and restores afterwards. No test
   rolls its own fixture, and no test writes into this repository.
