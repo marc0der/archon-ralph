@@ -31,19 +31,24 @@ const CITATION = "  Spec: `specs/mock.md` §1";
 
 /**
  * A plan with `shipped`, `open` and `superseded` real items, each under a
- * `CITATION` line.
+ * `CITATION` line unless `cited` says otherwise.
  *
  * The `## Entry Format` exemplar is included because it is an open item
  * textually: the `Plan:` row must count through `planItemsBody` like every
  * other count in the lifecycle, and a fixture without the heading would pass
  * either way.
+ *
+ * `cited: false` is the one plan the third review guard term rejects, and §7
+ * names it as the deliberate exception to the seeded citations. It omits the
+ * line rather than emptying `CITATION`, so no marker count and no column of any
+ * other fixture moves.
  */
-function writePlan(shipped: number, open: number, superseded: number): void {
+function writePlan(shipped: number, open: number, superseded: number, cited = true): void {
   const items = [
     ...Array.from({ length: shipped }, (_, i) => `- [x] **Shipped ${i + 1}**`),
     ...Array.from({ length: open }, (_, i) => `- [ ] **Open ${i + 1}**`),
     ...Array.from({ length: superseded }, (_, i) => `- [~] **Superseded ${i + 1}**`),
-  ].flatMap((item) => [item, CITATION]);
+  ].flatMap((item) => (cited ? [item, CITATION] : [item]));
   writeFileSync(
     "IMPLEMENTATION_PLAN.md",
     ["# Implementation Plan", "", "## Entry Format", "", "- [ ] **Exemplar**", "", "## Items", "", ...items, ""].join(
@@ -147,6 +152,29 @@ describe("ralph-report", () => {
         "  cycle 2",
         "  cycle 3",
       ]);
+    });
+  });
+
+  test("tells the two zero-open skip causes apart by the plan's citations", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      // One log, two plans. `cycle 1: clean` says nothing about which of the
+      // review guard's other two terms was false, so the cause is derived from
+      // the plan as it stands (§4) — and the operator's next command differs:
+      // `ralph-plan` to anchor the items, `ralph-build` to ship one.
+      writeLog(artifactsDir, [
+        "build: 2 iterations, plan exhausted",
+        "cycle 1: clean — no open items remain",
+      ]);
+
+      writePlan(2, 0, 0, false);
+      expect(report(artifactsDir)).toContain(
+        "    review skipped — no cited specs — run ralph-plan to anchor the items on them",
+      );
+
+      // The same two shipped items, now citing a spec: the third term holds,
+      // so the shipped cause is the only one left to name.
+      writePlan(2, 0, 0);
+      expect(report(artifactsDir)).toContain("    review skipped — no shipped items to audit");
     });
   });
 
@@ -392,6 +420,53 @@ describe("ralph-report modes", () => {
         "  review   skipped — no shipped items to audit",
         "",
         "Plan: 0 shipped, 3 open, 0 superseded",
+      ]);
+    });
+  });
+
+  // `reviewReport` takes the same cause off the same plan read as the summary
+  // (§4). Its other two guard terms stay indistinguishable here, so the third
+  // is the only one the block report can name.
+  test("names the uncited cause for an absent review row", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, ["seed: nothing to archive", "plan: converged on pass 1"]);
+
+      writePlan(2, 0, 0, false);
+      const uncited = runMain({ ...process.env, INPUTS_MODE: "review" });
+
+      expect(uncited.code).toBe(0);
+      expect(uncited.stdout).toEqual([
+        "  review   skipped — no cited specs — run ralph-plan to anchor the items on them",
+        "",
+        "Plan: 2 shipped, 0 open, 0 superseded",
+      ]);
+
+      writePlan(2, 0, 0);
+      const cited = runMain({ ...process.env, INPUTS_MODE: "review" });
+
+      expect(cited.code).toBe(0);
+      expect(cited.stdout).toEqual([
+        "  review   skipped — no shipped items to audit",
+        "",
+        "Plan: 2 shipped, 0 open, 0 superseded",
+      ]);
+    });
+  });
+
+  // No plan at all: `counts` throws, the predicate is false, and the row names
+  // the shipped cause. Claiming the gate fired would name a cause the run never
+  // reached — the `Plan:` row below already says the artifact is missing.
+  test("falls back to the shipped cause when no plan file exists", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, ["seed: nothing to archive"]);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "review" });
+
+      expect(ran.code).toBe(0);
+      expect(ran.stdout).toEqual([
+        "  review   skipped — no shipped items to audit",
+        "",
+        "Plan: no IMPLEMENTATION_PLAN.md in the tree",
       ]);
     });
   });
