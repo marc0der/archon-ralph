@@ -40,6 +40,44 @@ export function countItems(body: string, marker: ItemMarker): number {
 }
 
 /**
+ * Review's anchor set: the distinct `specs/` paths the items in `body` cite,
+ * in byte order. Mirrors ralph's `cited_specs`.
+ *
+ * `specs/` is a chronological record rather than a statement of current
+ * requirements, so the set is derived from the plan: a pass that read the whole
+ * corpus would file drift against correct code. `body` comes from
+ * `planItemsBody` for the reason recorded there — the exemplar under
+ * `## Entry Format` cites `specs/file.md`, so the whole-file form reports a
+ * freshly scaffolded plan as citing one spec.
+ *
+ * The line is trimmed first: items are indented, and a CRLF plan carries a
+ * trailing `\r` that would otherwise stick to the last token. `Spec:` must then
+ * be a whole field and not a substring, so a `Steps` line naming a spec path,
+ * or mentioning the `Spec:` field, contributes nothing. A path is a whole
+ * non-space, non-backtick token, which keeps a nested repository's
+ * `source/svc/specs/x.md` distinct from the root's `specs/x.md`.
+ *
+ * The three citation forms that name no specification — `AGENTS.md
+ * verification gate`, a `Major` finding's `IMPLEMENTATION_PLAN.md` and a
+ * `Minor` finding's rule file — are excluded by that token rule alone, with no
+ * special case. No marker is filtered, a `[~]` item's citation included, as
+ * ralph filters none.
+ */
+export function citedSpecs(body: string): string[] {
+  const cited = new Set<string>();
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    // Whitespace alone separates the field, as awk's `$1` does; backticks cut
+    // the tokens but never the field name.
+    if (trimmed.split(/[ \t]+/)[0] !== "Spec:") continue;
+    for (const token of trimmed.split(/[ \t`]+/)) {
+      if (token.includes("specs/")) cited.add(token);
+    }
+  }
+  return [...cited].sort(byteOrder);
+}
+
+/**
  * Ralph's build budget, `ceil(open × 1.2)`, in integer arithmetic.
  *
  * Bit-identical to ralph's `(count * 6 + 4) / 5`; the float form is avoided
