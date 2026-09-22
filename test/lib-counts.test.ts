@@ -18,7 +18,7 @@ describe("planItemsBody", () => {
     await withTempRepo(() => {
       writeFileSync(
         "IMPLEMENTATION_PLAN.md",
-        "# Implementation Plan\n\n## Entry Format\n\n- [ ] **Exemplar**\n\n## Items\n\n- [ ] **Real**\n",
+        "# Implementation Plan\n\n## Entry Format\n\n- [ ] **Exemplar**\n\n## Items\n\n- [ ] **Real**\n  Spec: `specs/mock.md` §1\n",
       );
 
       const body = planItemsBody();
@@ -31,7 +31,8 @@ describe("planItemsBody", () => {
 
   test("returns the whole file when the ## Items heading is absent", async () => {
     await withTempRepo(() => {
-      const text = "# Implementation Plan\n\n- [ ] **Real**\n- [x] **Shipped**\n";
+      const text =
+        "# Implementation Plan\n\n- [ ] **Real**\n  Spec: `specs/mock.md` §1\n- [x] **Shipped**\n  Spec: `specs/mock.md` §2\n";
       writeFileSync("IMPLEMENTATION_PLAN.md", text);
 
       expect(planItemsBody()).toBe(text);
@@ -40,7 +41,10 @@ describe("planItemsBody", () => {
 
   test("tolerates trailing whitespace on the heading", async () => {
     await withTempRepo(() => {
-      writeFileSync("IMPLEMENTATION_PLAN.md", "- [ ] **Exemplar**\n## Items  \n- [ ] **Real**\n");
+      writeFileSync(
+        "IMPLEMENTATION_PLAN.md",
+        "- [ ] **Exemplar**\n## Items  \n- [ ] **Real**\n  Spec: `specs/mock.md` §1\n",
+      );
 
       expect(countItems(planItemsBody(), "[ ]")).toBe(1);
     });
@@ -49,7 +53,7 @@ describe("planItemsBody", () => {
   test("reads the path it is given", async () => {
     await withTempRepo(({ root }) => {
       const path = join(root, "OTHER_PLAN.md");
-      writeFileSync(path, "## Items\n- [x] **Shipped**\n");
+      writeFileSync(path, "## Items\n- [x] **Shipped**\n  Spec: `specs/mock.md` §1\n");
 
       expect(countItems(planItemsBody(path), "[x]")).toBe(1);
     });
@@ -73,9 +77,13 @@ describe("countItems", () => {
     "## Items",
     "",
     "- [ ] **Open one**",
+    "  Spec: `specs/mock.md` §1",
     "- [ ] **Open two**",
+    "  Spec: `specs/mock.md` §2",
     "- [x] **Shipped**",
+    "  Spec: `specs/mock.md` §3",
     "- [~] **Superseded**",
+    "  Spec: `specs/mock.md` §4",
     "  - [ ] **Indented open**",
     "\t- [x] **Tabbed shipped**",
     "Prose mentioning - [ ] mid-line",

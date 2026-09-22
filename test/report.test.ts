@@ -21,7 +21,17 @@ function writeLog(artifactsDir: string, lines: string[]): void {
 }
 
 /**
- * A plan with `shipped`, `open` and `superseded` real items.
+ * The citation every seeded item carries (spec-anchored-review §7).
+ *
+ * A fixture standing in for a plan satisfies the contract the plan now
+ * carries, so a later test that starts reading citations finds them here
+ * already. Indented by two spaces, so no marker count moves.
+ */
+const CITATION = "  Spec: `specs/mock.md` §1";
+
+/**
+ * A plan with `shipped`, `open` and `superseded` real items, each under a
+ * `CITATION` line.
  *
  * The `## Entry Format` exemplar is included because it is an open item
  * textually: the `Plan:` row must count through `planItemsBody` like every
@@ -33,7 +43,7 @@ function writePlan(shipped: number, open: number, superseded: number): void {
     ...Array.from({ length: shipped }, (_, i) => `- [x] **Shipped ${i + 1}**`),
     ...Array.from({ length: open }, (_, i) => `- [ ] **Open ${i + 1}**`),
     ...Array.from({ length: superseded }, (_, i) => `- [~] **Superseded ${i + 1}**`),
-  ];
+  ].flatMap((item) => [item, CITATION]);
   writeFileSync(
     "IMPLEMENTATION_PLAN.md",
     ["# Implementation Plan", "", "## Entry Format", "", "- [ ] **Exemplar**", "", "## Items", "", ...items, ""].join(

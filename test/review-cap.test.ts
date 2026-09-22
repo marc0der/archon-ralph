@@ -20,7 +20,16 @@ import { planStateHash, readCounter, writeCounter } from "../template/scripts/li
 import { withTempRepo } from "./helpers.ts";
 
 /**
- * A plan whose `## Items` body holds `items`.
+ * The citation every seeded item carries (spec-anchored-review §7).
+ *
+ * A fixture standing in for a plan satisfies the contract the plan now
+ * carries, so a later test that starts reading citations finds them here
+ * already. Indented by two spaces, so no marker count moves.
+ */
+const CITATION = "  Spec: `specs/mock.md` §1";
+
+/**
+ * A plan whose `## Items` body holds `items`, each under a `CITATION` line.
  *
  * The `## Entry Format` exemplar is included because the script and
  * `ralph-snapshot` must both count through `planItemsBody`: a test that omits
@@ -38,7 +47,7 @@ function writePlan(items: string[]): void {
       "",
       "## Items",
       "",
-      ...items,
+      ...items.flatMap((item) => [item, CITATION]),
       "",
     ].join("\n"),
   );

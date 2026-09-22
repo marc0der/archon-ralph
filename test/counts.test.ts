@@ -15,8 +15,18 @@ import { withTempRepo } from "./helpers.ts";
 const REAL_TEMPLATE = join(import.meta.dir, "../template/ralph/templates/IMPLEMENTATION_PLAN.md");
 
 /**
+ * The citation every seeded item carries (spec-anchored-review §7).
+ *
+ * A fixture standing in for a plan satisfies the contract the plan now
+ * carries, so a later test that starts reading citations finds them here
+ * already. Indented by two spaces, so no marker count moves.
+ */
+const CITATION = "  Spec: `specs/mock.md` §1";
+
+/**
  * A plan with an exemplar under `## Entry Format` and `items` below `## Items`.
- * The exemplar is a real `- [ ]` at column zero that no count may see.
+ * The exemplar is a real `- [ ]` at column zero that no count may see. Each
+ * item below `## Items` gets a `CITATION` line of its own.
  */
 function writePlan(items: string[]): void {
   writeFileSync(
@@ -31,7 +41,7 @@ function writePlan(items: string[]): void {
       "",
       "## Items",
       "",
-      ...items,
+      ...items.flatMap((item) => [item, CITATION]),
       "",
     ].join("\n"),
   );
