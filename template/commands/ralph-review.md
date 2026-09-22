@@ -1,6 +1,6 @@
 ---
 description: Ralph Wiggum review loop — audit the specs IMPLEMENTATION_PLAN.md cites and file findings.
-source: marc0der/ralph@36e8c8b prompts/review.md
+source: marc0der/ralph@f6d2405 prompts/review.md
 ---
 
 # Review Agent

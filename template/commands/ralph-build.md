@@ -1,6 +1,6 @@
 ---
 description: Ralph Wiggum build loop — implement one IMPLEMENTATION_PLAN.md item, verify it, then commit.
-source: marc0der/ralph@36e8c8b prompts/build.md
+source: marc0der/ralph@f6d2405 prompts/build.md
 ---
 
 # Build Agent
