@@ -35,6 +35,9 @@ const WORKFLOWS = join(TEMPLATE, "workflows");
 /** The composing lifecycle: the only file with a `loop_group` and a `seed`. */
 const LIFECYCLE = "ralph-wiggum.yaml";
 
+/** The phase file whose `snapshot` node carries the review guard. */
+const REVIEW = "ralph-review.yaml";
+
 /** Where a `script:` or a `loop.command` resolves to. Archon omits the suffix. */
 function resolve(dir: string, name: string, suffix: string): string {
   return join(TEMPLATE, dir, name.endsWith(suffix) ? name : `${name}${suffix}`);
@@ -316,6 +319,24 @@ describe("the workflow definitions", () => {
       expect(
         following.filter(({ node }) => node["trigger_rule"] !== "all_done").map(({ at }) => at),
       ).toEqual([]);
+    });
+  });
+
+  test("the review guard names open, shipped and cited", async () => {
+    await withTempRepo(() => {
+      const review = parsed.find((entry) => entry.file === REVIEW);
+      expect(review).toBeDefined();
+
+      // spec-anchored-review §3: the fourth review precondition is a third
+      // term in this one expression and nothing else. Without it the phase
+      // audits a plan that cites no specification — the anchor set is empty,
+      // so a pass has no standard to measure the tree against and reports a
+      // clean audit of nothing. The whole expression is pinned because a term
+      // dropped from it reads at run time as a guard that simply passed.
+      expect({ file: REVIEW, when: review?.byId.get("snapshot")?.node["when"] }).toEqual({
+        file: REVIEW,
+        when: "$counts.output.open == 0 && $counts.output.shipped > 0 && $counts.output.cited > 0",
+      });
     });
   });
 
