@@ -59,11 +59,27 @@ function addOrigin(root: string): string {
   return origin;
 }
 
-/** An open plan and a build snapshot, so nothing but the push decides the exit. */
+/**
+ * An open plan and a build snapshot, so nothing but the push decides the exit.
+ *
+ * Each item carries a `Spec:` citation (spec-anchored-review §7): a fixture
+ * standing in for a plan satisfies the contract the plan now carries. The
+ * citation lines are indented, so no marker count moves.
+ */
 function setup(artifactsDir: string, budget = 6): void {
   writeFileSync(
     "IMPLEMENTATION_PLAN.md",
-    ["# Implementation Plan", "", "## Items", "", "- [ ] **One**", "- [ ] **Two**", ""].join("\n"),
+    [
+      "# Implementation Plan",
+      "",
+      "## Items",
+      "",
+      "- [ ] **One**",
+      "  Spec: `specs/mock.md` §1",
+      "- [ ] **Two**",
+      "  Spec: `specs/mock.md` §2",
+      "",
+    ].join("\n"),
   );
   writeFileSync(join(artifactsDir, "repo-state.txt"), repoState());
   writeCounter(join(artifactsDir, "build-budget.txt"), budget);

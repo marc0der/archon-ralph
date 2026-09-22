@@ -15,11 +15,30 @@ import { main } from "../template/scripts/ralph-plan-cap.ts";
 import { planStateHash, readCounter, writeCounter } from "../template/scripts/lib/ralph.ts";
 import { withTempRepo } from "./helpers.ts";
 
-/** A plan whose `## Items` body holds `items`, as `ralph-snapshot` finds it. */
+/**
+ * The citation every seeded item carries (spec-anchored-review §7).
+ *
+ * A fixture standing in for a plan satisfies the contract the plan now
+ * carries, so a later test that starts reading citations finds them here
+ * already. Indented by two spaces, so no marker count moves.
+ */
+const CITATION = "  Spec: `specs/mock.md` §1";
+
+/**
+ * A plan whose `## Items` body holds `items`, as `ralph-snapshot` finds it,
+ * each item under a `CITATION` line of its own.
+ */
 function writePlan(items: string[]): void {
   writeFileSync(
     "IMPLEMENTATION_PLAN.md",
-    ["# Implementation Plan", "", "## Items", "", ...items, ""].join("\n"),
+    [
+      "# Implementation Plan",
+      "",
+      "## Items",
+      "",
+      ...items.flatMap((item) => [item, CITATION]),
+      "",
+    ].join("\n"),
   );
 }
 
