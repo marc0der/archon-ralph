@@ -273,8 +273,13 @@ describe("ralph-seed output", () => {
 });
 
 describe("ralph-seed init mode", () => {
-  /** The plan a phase workflow finds in the tree, in a shape `init` must not touch. */
-  const PLAN = "# Implementation Plan\n\n## Items\n\n- [ ] **Ship the thing**\n";
+  /**
+   * The plan a phase workflow finds in the tree, in a shape `init` must not
+   * touch. The item carries a `Spec:` citation (spec-anchored-review §7), so
+   * the fixture satisfies the contract a real plan now carries.
+   */
+  const PLAN =
+    "# Implementation Plan\n\n## Items\n\n- [ ] **Ship the thing**\n  Spec: `specs/mock.md` §1\n";
 
   // The whole reason `init` exists: `ralph-build` runs it on the plan it is
   // about to build, and an unconditional scaffold would replace that plan with
