@@ -136,11 +136,24 @@ function openAfter(end: string | null): number | null {
   return named?.[1] === undefined ? null : Number(named[1]);
 }
 
+/**
+ * The skip cause of a review guard whose third term is false: the anchor set is
+ * empty, so a pass would have no specification to measure the tree against.
+ *
+ * It names `ralph-plan` and not `ralph-build` because the citation is the plan's
+ * to write. The cause outranks the shipped one for the same reason: the row is
+ * only reached with nothing open, so a plan that also shipped nothing has no
+ * item for `ralph-build` to take, and `ralph-plan` is the next command under
+ * both causes at once.
+ */
+const NO_CITED_SPECS = "no cited specs — run ralph-plan to anchor the items on them";
+
 /** Why `review` was skipped, read off the same cycle line the row belongs to. */
-function reviewSkipped(open: number | null): string {
+function reviewSkipped(open: number | null, uncited: boolean): string {
   // `open == 0` is the guard `review` is declared with (§3.1), so a clean cycle
-  // that skipped review had nothing shipped to audit.
-  if (open === 0) return "no shipped items to audit";
+  // that skipped review had nothing shipped to audit — or nothing cited to
+  // audit it against, which the operator resolves differently.
+  if (open === 0) return uncited ? NO_CITED_SPECS : "no shipped items to audit";
   // The cycle cap's wording, uncounted, for the cycle whose line does not count.
   if (open === null) return "open items remain";
   return `${open} open items remain`;
@@ -208,6 +221,27 @@ function planRow(): string {
     // Reachable: `report` is `always_run`, so it runs after a `seed` that never
     // scaffolded the plan. Naming the gap beats printing three zeroes.
     return "Plan: no IMPLEMENTATION_PLAN.md in the tree";
+  }
+}
+
+/**
+ * Whether the plan cites no spec, through the same live read `planRow` makes.
+ *
+ * A skipped node writes no row, so the third guard term is derived from the plan
+ * as it stands rather than from `outcome.log`. One read explains a row in every
+ * cycle block, the ones that closed earlier in an `auto` run included: the
+ * anchor set never narrows, `plan` runs once before the group, and a widening
+ * needs a pass that a set of nothing never gets (§4).
+ *
+ * An unreadable plan is **not** uncited. `counts` fails the run on a missing
+ * artifact, so the other rows report that state, and claiming the gate fired
+ * would name a cause the run never reached.
+ */
+function uncitedPlan(): boolean {
+  try {
+    return counts().cited === 0;
+  } catch {
+    return false;
   }
 }
 
@@ -304,6 +338,9 @@ export function report(artifactsDir: string): string[] {
     topRow("seed", phaseState("seed", seed, abort, NOT_REACHED)),
     topRow("plan", phaseState("plan", plan, abort, NOT_REACHED)),
   ];
+  // Read once, before any block renders: every block's skipped review shares
+  // the one anchor set the run worked from.
+  const uncited = uncitedPlan();
   cycles.forEach((cycle, index) => {
     // The index, not the N in the line: a cycle whose guard failed mid-way has
     // no `cycle N:` line at all, and its block still needs a header.
@@ -319,7 +356,7 @@ export function report(artifactsDir: string): string[] {
           "review",
           cycle.review,
           abort,
-          `skipped — ${reviewSkipped(open)}`,
+          `skipped — ${reviewSkipped(open, uncited)}`,
           open === null ? "" : `, filed ${open} findings`,
         ),
       ),
@@ -398,12 +435,15 @@ export function buildReport(artifactsDir: string): string[] {
  *
  * The absent row is the guard's first clause and not its second: a block with
  * open items outstanding skipped for that reason, but the row it prints names
- * the audit, because that is the phase that did not happen.
+ * the audit, because that is the phase that did not happen. The third clause is
+ * the one this row can tell apart, off the same plan read the summary makes;
+ * the remaining two stay indistinguishable here and keep one wording (§4).
  */
 export function reviewReport(artifactsDir: string): string[] {
   const { outcome, abort } = readRun(artifactsDir);
   const review = currentCycle(outcome.cycles)?.review ?? null;
-  return phaseReport("review", review, abort, "skipped — no shipped items to audit");
+  const absent = uncitedPlan() ? NO_CITED_SPECS : "no shipped items to audit";
+  return phaseReport("review", review, abort, `skipped — ${absent}`);
 }
 
 /** The renderer each mode prints. Exhaustive over `MODES` by type. */
