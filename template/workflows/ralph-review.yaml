@@ -1,14 +1,14 @@
 name: ralph-review
 description: |
   Use when: User wants only the REVIEW phase of the Ralph Wiggum lifecycle —
-            audit the items IMPLEMENTATION_PLAN.md records as shipped, and
+            audit the specifications IMPLEMENTATION_PLAN.md's items cite, and
             build nothing.
   Triggers: "ralph review", "review the plan", "audit what ralph shipped".
-  Does: Audits the shipped items against the specs and the code with a fresh
-        context per pass, files each finding as a new plan item, and stops on a
-        pass that files nothing or at ralph's cap of 6 passes. Ends with the
-        review row and the plan counts. Implements nothing, commits nothing
-        and pushes nothing. A plan with open items or nothing shipped is
+  Does: Audits the cited specs against the code with a fresh context per pass,
+        files each finding as a new plan item, and stops on a pass that files
+        nothing or at ralph's cap of 6 passes. Ends with the review row and
+        the plan counts. Implements nothing, commits nothing and pushes
+        nothing. A plan with open items, nothing shipped or no cited spec is
         skipped and reported, not an error.
   NOT for: Writing the plan (ralph-plan), implementing it (ralph-build), or the
            whole lifecycle (ralph-wiggum).
@@ -63,12 +63,13 @@ nodes:
     always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
-  # REVIEW — audit the shipped items and file findings as new plan items.
-  # Guarded on a plan with nothing open and something shipped, so a plan
-  # still being built is left to a build rather than audited half-done. The
-  # cap aborts a pass that un-ticks an item; the guard fails the run on it.
-  # The join rule on the guard is what lets it run after a loop that was
-  # skipped as well as after one that ran.
+  # REVIEW — audit the specs the shipped items cite and file findings as
+  # new plan items. Guarded on nothing open, something shipped and at least
+  # one cited spec, so a plan still being built is left to a build rather
+  # than audited half-done, and a plan anchored on nothing is never audited
+  # against nothing. The cap aborts a pass that un-ticks an item; the guard
+  # fails the run on it. The join rule on the guard is what lets it run
+  # after a loop that was skipped as well as after one that ran.
   # ═══════════════════════════════════════════════════════════════════════
   - id: counts
     depends_on: [init]

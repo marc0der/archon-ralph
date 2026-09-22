@@ -8,7 +8,7 @@ description: |
         PLAN loop to convergence, then repeats build-to-exhaustion and review
         as one cycle — each BUILD iteration implements one plan item with a
         fresh context, tests, commits and pushes; each REVIEW iteration audits
-        the shipped items and files findings as new plan items — cycling again
+        the cited specs and files findings as new plan items — cycling again
         while open items remain, and stopping when a review pass files nothing
         or the cycle cap is reached. Ends with a factual lifecycle report.
   NOT for: PR reviews, one-off fixes, or PRD/story-driven work.
@@ -117,10 +117,10 @@ nodes:
   #
   # The body is the two phase files inlined. Each keeps its own counts node,
   # `when:` guard, snapshot, cap script and guard, so a build with nothing
-  # open and a review with nothing shipped skip and report exactly as they
-  # do standalone. `review` depends on `build`, which waits on every sink of
-  # the build block, and `report` is that block's only sink — `guard`
-  # precedes it, as every other node does. `report` declares
+  # open and a review with nothing shipped or no cited spec skip and report
+  # exactly as they do standalone. `review` depends on `build`, which waits
+  # on every sink of the build block, and `report` is that block's only sink
+  # — `guard` precedes it, as every other node does. `report` declares
   # `trigger_rule: all_done` and so always completes, whatever the guard
   # exited with. A rejected push therefore does not stop the cycle before the
   # audit: the review block runs, and its own `guard` reads the same
