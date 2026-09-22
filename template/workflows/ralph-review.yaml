@@ -63,7 +63,7 @@ nodes:
     always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
-  # REVIEW — audit the specs the shipped items cite and file findings as
+  # REVIEW — audit the specs the plan's items cite and file findings as
   # new plan items. Guarded on nothing open, something shipped and at least
   # one cited spec, so a plan still being built is left to a build rather
   # than audited half-done, and a plan anchored on nothing is never audited
