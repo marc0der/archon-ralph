@@ -126,6 +126,8 @@ describe("ralph-report", () => {
       // Cycle 1: review filed findings, so build ran and review did too. Cycle
       // 2: the plan still held open items, so `review` was skipped on its
       // `open == 0` guard. Cycle 3: nothing shipped, so review had no audit.
+      // The plan holds one superseded item so that it still cites a spec: the
+      // shipped cause only renders once the third guard term is satisfied.
       writeLog(artifactsDir, [
         "build: 4 iterations, budget of 4 spent",
         "cycle 1: 3 open items remain — starting cycle 2",
@@ -133,7 +135,7 @@ describe("ralph-report", () => {
         "cycle 2: 3 open items remain — starting cycle 3",
         "cycle 3: clean — no open items remain",
       ]);
-      writePlan(0, 0, 0);
+      writePlan(0, 0, 1);
 
       const lines = report(artifactsDir);
       expect(lines).toContain("    review skipped — 3 open items remain");
