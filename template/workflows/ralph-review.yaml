@@ -78,7 +78,7 @@ nodes:
 
   - id: snapshot
     depends_on: [counts]
-    when: "$counts.output.open == 0 && $counts.output.shipped > 0"
+    when: "$counts.output.open == 0 && $counts.output.shipped > 0 && $counts.output.cited > 0"
     script: ralph-snapshot
     runtime: bun
     with: { mode: review }
