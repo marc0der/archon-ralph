@@ -2,7 +2,8 @@
 
 Settled on 2026-09-22, after `marc0der/ralph` re-anchored its review phase on `specs/`. This spec
 amends `specs/archon-native-lifecycle.md` — **the lifecycle spec** throughout. §2 lists every
-amendment, and nothing outside that list changes. A bare `§n` names a section of this spec.
+amendment, and nothing outside that list changes. A bare `§n` names a section of this spec; the
+bolded head of each §2 bullet names a section of the lifecycle spec.
 
 Ralph's own record of the change is `specs/spec-anchored-review.md` in the sibling ralph checkout,
 the upstream namesake of this file. It carries the reasoning this spec does not repeat: why two
@@ -60,7 +61,7 @@ Each bullet heads with the section of the lifecycle spec it amends.
   `$counts.output.*`; the term is added wherever the review guard is written.
 - **§3.2, the cycle.** "Zero open items after a cycle means one of three things" becomes four. The
   fourth is the one §3 records: build shipped everything and review was skipped for citing no
-  spec. Unlike the third case it is neither impossible nor harmless, and the sentence says so.
+  spec. Unlike the second case it is neither impossible nor harmless, and the sentence says so.
 - **§4.1, the shared library.** It gains `citedSpecs(body)` (§4 below). The sentence "**Every count
   in every script goes through it**" is unchanged: `citedSpecs` takes a body and not a file for
   exactly that reason, and its callers pass `planItemsBody()`.
@@ -89,6 +90,10 @@ Each bullet heads with the section of the lifecycle spec it amends.
 - **§9, the test list.** "`ralph-counts` prints the three counts" becomes four. "`ralph-review-cap`
   … converges on an unchanged hash with the audited count in the message" keeps its shape and the
   count becomes the cited-spec count.
+- **§12.3, unmet predicates in a standalone run.** The sentence naming ralph's hard stops — a
+  `build` with no open items, a `review` with nothing shipped or with open items — gains the
+  fourth, a `review` whose plan cites no spec. The rule below it is unchanged, and §3 applies it to
+  the fourth gate.
 - **§12.5, the composition test list.** "the block reports render `skipped — no open items` and
   `skipped — no shipped items to audit` from a log with no phase row" gains the third
   block-report cause, `skipped — no cited specs`.
@@ -152,18 +157,20 @@ mechanical, and a pass that disobeys inflates the same count and nothing else.
 distinct `specs/` paths the items in `body` cite, sorted in byte order through the same `byteOrder`
 comparator the fingerprints use:
 
-- Keep each line whose **first whitespace-separated field is `Spec:`**, the line trimmed first
-  because items are indented. A field match and not a prefix match, so a `Steps` line naming a spec
-  path contributes nothing.
+- Keep each line whose **first whitespace-separated field is `Spec:`**, the line trimmed first —
+  items are indented, and a CRLF plan carries a trailing `\r` that would otherwise stick to the
+  last token. A field match and not a substring match, so a `Steps` line that names a spec path, or
+  mentions the `Spec:` field, contributes nothing.
 - From such a line, keep every token containing `specs/`, where tokens are separated by spaces,
   tabs and backticks. A path is therefore a whole non-space, non-backtick token, which keeps a
   nested repository's `source/svc/specs/x.md` distinct from the root's `specs/x.md`.
 - Deduplicate.
 
-Two citation forms name no specification and are excluded by that rule alone, with no special case:
-the terminal verification item's `AGENTS.md verification gate` or `CLAUDE.md verification gate`,
-and a `Minor` finding's rule-file citation. Neither token contains `specs/`, except where a
-project puts its rules directory under `specs/` — the widening §3 accepts.
+Three citation forms name no specification and are excluded by that rule alone, with no special
+case: the terminal verification item's `AGENTS.md verification gate` or `CLAUDE.md verification
+gate`, a `Major` finding's `IMPLEMENTATION_PLAN.md` citation, and a `Minor` finding's rule-file
+citation. No such token contains `specs/`, except where a project puts its rules directory under
+`specs/` — the widening §3 accepts.
 
 **`body` comes from `planItemsBody`, never from the whole file.** The exemplar under
 `## Entry Format` in `template/ralph/templates/IMPLEMENTATION_PLAN.md` cites `specs/file.md`, so
@@ -181,10 +188,10 @@ claim about the anchor set it would contradict ralph's implementation, and the i
 the authority.
 
 **Two consequences of mirroring, accepted.** A `Spec:` field listing two paths separated by a comma
-yields the token `specs/a.md,` with the comma attached, so the count over-reports by one and can
-disagree with the agent's own `Audited N of M specs.` line; and the exit line reads `audited 1
-specs` for a set of one. Both are ralph's behaviour at `f6d2405`, and the lifecycle spec §4.1's
-rule that these helpers mirror ralph's functions settles them.
+yields the token `specs/a.md,` with the comma attached, so a spec cited both with and without a
+trailing comma counts twice and can disagree with the agent's own `Audited N of M specs.` line; and
+the exit line reads `audited 1 specs` for a set of one. Both are ralph's behaviour at `f6d2405`,
+and the lifecycle spec §4.1's rule that these helpers mirror ralph's functions settles them.
 
 **`ralph-counts`** imports `citedSpecs` and adds `cited: citedSpecs(body).length` to the object it
 prints, from the body it already reads once.
@@ -193,18 +200,20 @@ prints, from the body it already reads once.
 of step 2 and `citedSpecs` in step 3, so the two figures come from one read. Its converged line
 becomes `review: converged on pass ${n}, audited ${audited} specs`. The count is what the pass
 swept, and Ralph derives it rather than trusting the agent's own claim: a clean review changes no
-file and records a metrics line of zeros, which is otherwise indistinguishable from a backend that
-read the prompt and did nothing. The un-tick guard, the hash comparison and the cap of 6 passes are
-unchanged.
+file, which is otherwise indistinguishable from a backend that read the prompt and did nothing. The
+un-tick guard, the hash comparison and the cap of 6 passes are unchanged.
 
 **`ralph-report`** distinguishes the new skip cause. The review guard now carries three terms and
 the cycle line counts only one of them, so a skip with nothing open is ambiguous between the other
 two, and the operator's next command differs: `ralph-build` for a plan that shipped nothing,
 `ralph-plan` for one that cites no spec. A skipped node writes no row, so the cause is derived from
-the plan as it stands — the same live read `planRow` already makes. In `auto` mode that single read
+the plan as it stands — the same live read `planRow` already makes, evaluated once before the cycle
+blocks are rendered and passed to `reviewSkipped` beside `open`. In `auto` mode that single read
 explains a row in every cycle block, cycles that closed earlier in the run included, and it is
 accurate for all of them for the reason §3 gives: the set never narrows, `plan` runs once before
-the group, and nothing after it removes a citation.
+the group, and nothing after it removes a citation. A widening cannot mislead it either: the set
+widens only when a review pass files a `Minor` citing a rule file under `specs/`, and a pass runs
+only on a non-empty set.
 
 - A predicate beside `planRow` is true when `counts().cited == 0`, and **false** for an absent or
   unreadable plan: `counts` fails the run on a missing artifact, so that state is reported by the
@@ -248,9 +257,11 @@ ralph** table of `AGENTS.md` and `CLAUDE.md` (§6).
 - **`template/commands/ralph-review.md`** — rewritten from `prompts/review.md`. Ralph's text
   carries the anchor set, the three checks and their ranges, the red suite as one finding, the
   budget of 10, the additive-only authority, the coverage line `Audited N of M specs.`, and the
-  three review-only editing rules. Two substitutions apply and no others: the lifecycle spec §6's
-  workspace-anchor substitution replaces `The workspace root is {{WORKSPACE}}.` and every remaining
-  `{{WORKSPACE}}/` prefix is dropped. The frontmatter `description:` reads "audit every shipped
+  three review-only editing rules. Two of the lifecycle spec §6's five substitutions apply: item
+  1's frontmatter, and item 3's workspace anchor, which replaces `The workspace root is
+  {{WORKSPACE}}.` and drops every remaining `{{WORKSPACE}}/` prefix. Items 2, 4 and 5 have nothing
+  to act on — ralph's review prompt carries no goal, no loop-control section, and already states
+  the subagent rules §6 keeps. The frontmatter `description:` reads "audit every shipped
   IMPLEMENTATION_PLAN.md item" today and becomes false with the rest of the file; it is rewritten
   to the specs the plan cites, in present tense, and keeps naming the loop.
 - **`template/commands/ralph-plan.md`** — two edits. The **Operational guardrails** bullet in Phase
@@ -311,7 +322,8 @@ Three in-file comments state the old anchor or the old guard and are re-worded w
 sit above: `ralph-review.yaml`'s `REVIEW` banner, which says the phase audits the shipped items and
 is guarded on nothing open and something shipped; `ralph-wiggum.yaml`'s `CYCLE` banner, which says
 a review with nothing shipped skips and reports as it does standalone; and `ralph-counts.ts`'s
-header, which quotes the review guard as `open == 0 && shipped > 0`.
+header, which calls them the plan's three item counts and quotes the review guard as
+`open == 0 && shipped > 0`.
 
 ## 7. Testing
 
@@ -325,6 +337,8 @@ Extending the lifecycle spec §9. Every test stays inside `withTempRepo`.
 - `citedSpecs` excludes a rule-file citation.
 - `citedSpecs` deduplicates two items citing the same spec.
 - `citedSpecs` keeps a nested repository's `source/svc/specs/x.md` distinct from `specs/x.md`.
+- `citedSpecs` keeps the comma of a `Spec:` field listing two paths, so `specs/a.md,` and
+  `specs/a.md` are distinct — the mirrored behaviour §4 accepts.
 - `citedSpecs` returns the paths in byte order.
 - `citedSpecs` counts a citation under a `[~]` item.
 - `citedSpecs` over `planItemsBody` ignores the exemplar under `## Entry Format`; a freshly
@@ -364,12 +378,14 @@ Added to the lifecycle spec §10.
 - **A rules directory for this repository**, and any `Minor` finding against archon-ralph itself.
 - **Publishing the anchor set's paths**, in `ralph-counts`'s JSON or in `ralph-report`'s `Plan:`
   row. The count is what the guard and the exit line need.
-- **Ralph's own out-of-scope list for this feature**, its §13, which binds here unchanged and in
-  full: a goal for review, a recorded cycle start point or plan-path argument, status or
-  supersession headers on spec files, the loop enforcing the budget or the severity levels — both
-  stay in the prompt — review writing any file but `IMPLEMENTATION_PLAN.md` and a `PROGRESS.md`
-  supersession entry, review re-decomposing, re-scoping or re-ordering an item `plan` wrote,
-  hardening `Done when` criteria, and commits, pushes and pull request comments.
+- **Ralph's own out-of-scope list for this feature**, its §13, which binds here in full: a goal
+  for review, a recorded cycle start point or plan-path argument, status or supersession headers
+  on spec files, the loop enforcing the budget or the severity levels — both stay in the prompt —
+  review writing any file but `IMPLEMENTATION_PLAN.md` and a `PROGRESS.md` supersession entry,
+  review re-decomposing, re-scoping or re-ordering an item `plan` wrote, hardening `Done when`
+  criteria, and commits, pushes and pull request comments. One item translates rather than
+  carries: ralph refuses `-g` on `review`, where archon-ralph neither requires nor refuses a
+  positional message (the lifecycle spec §12.3). No goal reaches the review prompt either way.
 - **The silent-drop gap.** A spec `plan` read and produced no item from is outside the anchor set
   and invisible to review. Ralph accepts it; closing it needs a goal passed to review or a recorded
   cycle start point, and both are out of scope above.
