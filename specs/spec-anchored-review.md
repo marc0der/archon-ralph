@@ -288,7 +288,7 @@ install `.archon/` and do name one.
 
 ## 6. Documentation
 
-**`README.md`** keeps its shape. Five edits:
+**`README.md`** keeps its shape. Six edits:
 
 - The **Cycles** step's `Review` bullet: review runs when build left no open items, at least one
   shipped item **and at least one cited spec**, and each pass audits the specs the plan's items
@@ -304,6 +304,11 @@ install `.archon/` and do name one.
   contract at any level. Under three it holds only for a finding with no written rule behind it; a
   `Minor` citing a rule file is the tier working as designed. The step draws that line and keeps
   its conclusion for the unfounded case.
+- The prompts paragraph below the source-tree listing names the prompts' baseline as
+  `marc0der/ralph@36e8c8b`; it names `f6d2405`. **Decision, 2026-09-22**, settled while planning:
+  the list above omitted it, and a baseline the prompts no longer carry is a false statement about
+  the shipped files. It is the same edit as §6's `AGENTS.md` and `CLAUDE.md` baseline sentence, and
+  it lands with them.
 
 **`AGENTS.md`** and **`CLAUDE.md`**, which stay identical copies:
 
@@ -356,6 +361,10 @@ Extending the lifecycle spec §9. Every test stays inside `withTempRepo`.
   says nothing about the field, so the third term needs a check of its own.
 - `ralph-report` falls back to the shipped cause when the plan is absent: `counts` throws, the
   predicate is false, and the row reads `skipped — no shipped items to audit`.
+- `ralph-report`'s fixture `outcome.log` lines read `audited N specs`. **Decision, 2026-09-22**,
+  settled while planning: §2's amendment to the lifecycle spec §4.2 rewords the sample summary, and
+  `test/report.test.ts` asserts that sample verbatim. A fixture line no `ralph-review-cap` run can
+  write is a stale standard, by the same reasoning as the seeded citations below.
 - The three command files still contain no `{{WORKSPACE}}`, which the existing token test asserts.
 
 **Every seeded plan in the suite gains a `Spec:` citation under each item, except where the test
