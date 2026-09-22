@@ -225,7 +225,7 @@ runtime dependencies. `bun install` inside it is optional — it only pulls
 `@types/bun` for editor/type-check DX.
 
 The three prompts under `commands/` are ralph's `prompts/plan.md`, `build.md` and `review.md` at
-`marc0der/ralph@36e8c8b`, carrying only the substitutions this workflow needs. Each one records
+`marc0der/ralph@f6d2405`, carrying only the substitutions this workflow needs. Each one records
 that baseline in its `source:` frontmatter line — check it before porting a change from upstream.
 
 ## License

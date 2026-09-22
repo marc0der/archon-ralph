@@ -1,7 +1,7 @@
 ---
 description: Ralph Wiggum plan loop — audit specs and code, then write IMPLEMENTATION_PLAN.md.
 argument-hint: "<goal>"
-source: marc0der/ralph@36e8c8b prompts/plan.md
+source: marc0der/ralph@f6d2405 prompts/plan.md
 ---
 
 # Planning Agent

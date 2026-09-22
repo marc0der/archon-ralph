@@ -71,7 +71,7 @@ work. Their upstream is the sibling checkout at `../ralph`, which carries `marc0
 | `template/ralph/templates/IMPLEMENTATION_PLAN.md` | `templates/IMPLEMENTATION_PLAN.md` |
 | `template/ralph/templates/PROGRESS.md` | `templates/PROGRESS.md` |
 
-The current baseline is `36e8c8b`, recorded in each prompt's `source:` frontmatter line. Port
+The current baseline is `f6d2405`, recorded in each prompt's `source:` frontmatter line. Port
 ralph's text verbatim and confine local edits to the substitutions
 `specs/archon-native-lifecycle.md` §6 lists. Where this repository and ralph disagree on a rule
 the *agent* follows, ralph wins: archon-ralph changes how the agent is driven, not what it is told.

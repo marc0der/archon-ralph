@@ -75,7 +75,7 @@ describe("the loop prompts", () => {
     await withTempRepo(() => {
       // The `source:` line is what `git -C ../ralph show <sha>:prompts/<x>.md`
       // diffs against. Drop it and the next port has no baseline.
-      expect(holding("source: marc0der/ralph@36e8c8b")).toEqual(NAMES);
+      expect(holding("source: marc0der/ralph@f6d2405")).toEqual(NAMES);
     });
   });
 });
