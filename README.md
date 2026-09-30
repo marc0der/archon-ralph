@@ -11,21 +11,22 @@ It drops a self-contained `.archon/` workflow into your repo that:
 2. **Plans.** A loop that rewrites `IMPLEMENTATION_PLAN.md` from `specs/` and the codebase, each
    pass with a *fresh* context. It stops when a pass leaves the plan and `specs/` unchanged, or
    after 6 passes.
-3. **Cycles.** Build, then review, repeated as one `loop_group` iteration.
+3. **Build, review, build.** Three blocks in a straight line, each run once.
    - **Build** runs when the plan holds open items. Each iteration implements one item with a
      fresh context, tests, commits and pushes. It stops when the plan is exhausted, when two
      iterations in a row leave every repository unmoved, or when the budget — the open count plus
-     20 % headroom — is spent.
-   - **Review** runs when build left **no** open items, at least one shipped item and at least
-     one cited spec. Each pass audits the specs the plan's items cite and files findings as new
-     open items. It stops when a pass changes nothing, or after 6 passes.
+     20 % headroom — is spent. The first build records the cycle base, the commit each repository
+     stood at before it built anything.
+   - **Review** runs once, when build left **no** open items, at least one shipped item and a
+     cycle base. Its one pass audits the cycle's work and files every finding as a new open item.
+   - **Build** runs a second time and fixes what review found.
 4. **Reports.** A factual summary of every phase, the plan counts and the repositories that moved.
 
 A guard that is false **skips** its phase; a skip is never a failure. Build stopping short skips
-review, and the next cycle picks the open items up.
+review, and a later run picks the open items up.
 
-The cycle is a fixpoint. It ends when a cycle leaves zero open items — a review pass that files
-nothing — or when the cycle count reaches `cycle_cap`, whichever comes first.
+Nothing reviews the second build's fixes. That is what ralph accepts too: a later run is where they
+get reviewed.
 
 The plan file's contract — the item schema, its six fields and its markers — is ralph's. See
 [The implementation plan contract](https://github.com/marc0der/ralph#the-implementation-plan-contract)
@@ -78,8 +79,8 @@ Each phase also runs on its own, like ralph's `plan`, `build` and `review` comma
 |---|---|---|
 | `ralph-plan` | the plan loop: rewrite `IMPLEMENTATION_PLAN.md` from `specs/` and the code | required |
 | `ralph-build` | the build loop: implement the open items, test, commit, push | none |
-| `ralph-review` | the review loop: audit the code against the specs the plan cites, file findings as open items | none |
-| `ralph-wiggum` | plan, then build/review as a `loop_group` to the fixpoint, then report | required |
+| `ralph-review` | one review pass: audit the cycle's work, file findings as open items | none |
+| `ralph-wiggum` | plan, build, review, build, report | required |
 
 `ralph-plan` and `ralph-wiggum` **require** the goal, and stop before the first phase without one.
 `ralph-build` and `ralph-review` take **none** — the plan in the tree is their whole input — and a
@@ -88,7 +89,7 @@ it is the parent's goal.
 
 A phase workflow that has nothing to do is **skipped and reported**, never an error: `ralph-build`
 on a plan with no open items and `ralph-review` on one with open items, nothing shipped or no
-cited spec all exit 0 with a report. That is the same guard the lifecycle uses, so the two entry
+cycle base all exit 0 with a report. That is the same guard the lifecycle uses, so the two entry
 points behave alike.
 
 | Input | Default | Meaning |
