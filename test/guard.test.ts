@@ -43,8 +43,8 @@ describe("ralph-guard", () => {
     await withTempRepo(async () => {
       const { code, stderr } = runMain();
       expect(code).toBe(0);
-      // Nothing on stderr on the clean path: this node runs twice per cycle and
-      // an operator scanning the log for its output should find only aborts.
+      // Nothing on stderr on the clean path: this node runs once per build or
+      // review block and an operator scanning the log for its output should find only aborts.
       expect(stderr).toBe("");
     });
   });
