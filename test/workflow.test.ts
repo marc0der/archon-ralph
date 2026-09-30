@@ -243,8 +243,25 @@ describe("the workflow definitions", () => {
         lifecycle.placed.filter((entry) => keep(entry.node)).map((entry) => entry.id);
       expect(ids((node) => loopOf(node) !== null)).toEqual([]);
       expect(ids((node) => node["maxBudgetUsd"] !== undefined)).toEqual([]);
+      const header = isYaml(lifecycle.workflow) ? lifecycle.workflow : {};
+      expect({ file: LIFECYCLE, maxBudgetUsd: header["maxBudgetUsd"] }).toEqual({
+        file: LIFECYCLE,
+        maxBudgetUsd: undefined,
+      });
       expect(inputsOf(lifecycle)).toEqual(["skip_push"]);
       expect(ids((node) => node["include"] === "ralph-build")).toEqual(["build", "fix"]);
+
+      // §3.2: `fix` builds on what the review filed, so it follows review. The
+      // report names every phase so a failed one still leaves it reachable.
+      const dependsOn = (id: string) => ({
+        id,
+        depends_on: lifecycle.byId.get(id)?.node["depends_on"],
+      });
+      expect(dependsOn("fix")).toEqual({ id: "fix", depends_on: ["review"] });
+      expect(dependsOn("report")).toEqual({
+        id: "report",
+        depends_on: ["precondition", "seed", "plan", "build", "review", "fix"],
+      });
     });
   });
 
@@ -355,6 +372,19 @@ describe("the workflow definitions", () => {
         file: REVIEW,
         depends_on: ["review"],
       });
+
+      // The snapshot runs the review gate in `mode: review`, the guard joins
+      // whatever the pass left, and the report reads the exit row.
+      expect({ file: REVIEW, with: review?.byId.get("snapshot")?.node["with"] }).toEqual({
+        file: REVIEW,
+        with: { mode: "review" },
+      });
+      const guard = review?.byId.get("guard")?.node ?? {};
+      expect({ file: REVIEW, trigger_rule: guard["trigger_rule"] }).toEqual({
+        file: REVIEW,
+        trigger_rule: "all_done",
+      });
+      expect(strings(review?.byId.get("report")?.node["depends_on"])).toContain("exit");
     });
   });
 
@@ -487,7 +517,7 @@ describe("the workflow definitions", () => {
       // guard one snapshot.
       expect(guarded.length).toBeGreaterThanOrEqual(2);
       expect(
-        guarded.filter(({ when }) => !when.includes("$counts.output.run")).map(({ at }) => at),
+        guarded.filter(({ when }) => when !== "$counts.output.run == true").map(({ at }) => at),
       ).toEqual([]);
     });
   });
