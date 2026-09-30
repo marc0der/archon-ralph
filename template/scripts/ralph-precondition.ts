@@ -15,16 +15,23 @@
  * parent's goal, so refusing it in those modes would refuse every composed run
  * (§12.4). The work tree, the branch and the tools are checked in every mode.
  *
+ * In `build` and `review` mode the node also fails on `$ARTIFACTS_DIR/abort.txt`
+ * (one-shot review spec §3.2). A block's report always succeeds, so a failed
+ * guard does not stop the next block in `ralph-wiggum`; this check does. A
+ * standalone block starts in a fresh `ARTIFACTS_DIR`, so it fires only there.
+ *
  * Every check runs before the exit code is decided, so one run reports every
  * defect rather than one per restart. A `bun` or `git` missing from `PATH`
  * therefore also fails the checks that shell out to them; that cascade is
  * honest about what was tried.
  *
- * Invoked by Archon as a named script (`runtime: bun`); no args, no stdin, and
- * `ARTIFACTS_DIR` is unused — nothing has been seeded yet.
+ * Invoked by Archon as a named script (`runtime: bun`); no args, no stdin.
+ * `ARTIFACTS_DIR` is read for the abort check alone, and skipped when unset.
  */
 
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /** The three phases that can run on their own, each with its own entry conditions. */
 const MODES = ["plan", "build", "review"] as const;
@@ -84,8 +91,22 @@ export function main(env = process.env): number {
       'ralph-wiggum requires a goal: archon workflow run ralph-wiggum "<specification or sentence>"; ralph-plan takes the same goal.',
   };
 
+  // No `ARTIFACTS_DIR`, no marker to read: a block run outside Archon has no
+  // earlier block that could have aborted.
+  const artifactsDir = env.ARTIFACTS_DIR ?? "";
+  const checksAbort = mode !== "plan" && artifactsDir !== "";
+  const marker = join(artifactsDir, "abort.txt");
+  const abortLine =
+    checksAbort && existsSync(marker) ? readFileSync(marker, "utf8").split("\n")[0] : undefined;
+  const abortCheck: Check = {
+    label: "no earlier block aborted the run",
+    ok: abortLine === undefined,
+    message: `ralph-precondition: an earlier block aborted the run: ${abortLine}`,
+  };
+
   const checks: Check[] = [
     ...(mode === "plan" ? [goalCheck] : []),
+    ...(checksAbort ? [abortCheck] : []),
     {
       label: "the working directory is inside a git work tree",
       ok: worktree === "true",
