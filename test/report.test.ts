@@ -193,6 +193,23 @@ describe("ralph-report", () => {
     });
   });
 
+  // Only the row equal to the abort marker fails; the earlier build row keeps `ran`.
+  test("fails only the second build row when it carries the abort marker", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, [
+        "build: 9 iterations, plan exhausted",
+        "review: Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
+        "build: push rejected",
+      ]);
+      writeFileSync(join(artifactsDir, "abort.txt"), "build: push rejected\n");
+      writePlan(9, 2, 0);
+
+      const lines = report(artifactsDir);
+      expect(lines).toContain("  3 build     ran — 9 iterations, plan exhausted");
+      expect(lines).toContain("  5 build     failed — build: push rejected");
+    });
+  });
+
   test("reports an unreached run rather than failing", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       // `precondition` failed, so nothing wrote a log and nothing scaffolded a
