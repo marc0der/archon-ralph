@@ -406,6 +406,11 @@ gate skipped it reads its own skip row, because the gate wrote one. The absent-r
 (`skipped — no open items`, `skipped — no shipped items to audit`) go: a block that wrote no row
 failed before its gate, and prints `not reached`.
 
+**Decision, settled while planning.** A block report's row carries no phase number. A block does
+not know its position inside `ralph-wiggum`, where `build` is phase 3 or phase 5, so it prints the
+label and the state column of §5.1 without the leading number. The state text is rendered by the
+same function the summary uses.
+
 Inside `ralph-wiggum` one case prints the wrong row. A `fix` block stopped by §3.2's abort check
 writes no row, so its report prints the first build's row. The block reports are interim lines
 there, the summary is the product (the lifecycle spec §12.4), and the run has already failed. This
