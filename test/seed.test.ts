@@ -102,6 +102,47 @@ describe("ralph-seed archive", () => {
     });
   });
 
+  test("archive mode moves the cycle base to .ralph/<timestamp>/cycle-base", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+      writeFileSync("IMPLEMENTATION_PLAN.md", "old plan\n");
+      mkdirSync(".ralph");
+      writeFileSync(".ralph/cycle-base", ". abc123\n");
+
+      const { code, out } = runMain();
+
+      expect(code).toBe(0);
+      const dest = JSON.parse(out).archived;
+      expect(existsSync(".ralph/cycle-base")).toBe(false);
+      expect(readFileSync(`${dest}/cycle-base`, "utf8")).toBe(". abc123\n");
+      expect(readdirSync(dest).sort()).toEqual(["IMPLEMENTATION_PLAN.md", "cycle-base"]);
+    });
+  });
+
+  test("archives a cycle base present alone", async () => {
+    await withTempRepo(() => {
+      mkdirSync(".ralph");
+      writeFileSync(".ralph/cycle-base", ". abc123\n");
+
+      const dest = archive();
+
+      expect(dest).toMatch(/^\.ralph\/\d{8}-\d{6}$/);
+      expect(readdirSync(dest as string)).toEqual(["cycle-base"]);
+    });
+  });
+
+  test("no mode scaffolds a cycle base", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+
+      expect(runMain().code).toBe(0);
+      expect(existsSync(".ralph/cycle-base")).toBe(false);
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" }).code).toBe(0);
+      expect(existsSync(".ralph/cycle-base")).toBe(false);
+    });
+  });
+
   // Lazily: an empty `.ralph/<timestamp>/` would read as a cycle that shipped
   // nothing, and `ralph-report` lists the archive directory to the operator.
   test("creates no directory when there is nothing to archive", async () => {
@@ -324,6 +365,21 @@ describe("ralph-seed init mode", () => {
       expect(code).toBe(0);
       expect(existsSync(".ralph")).toBe(false);
       expect(JSON.parse(out).archived).toBeNull();
+    });
+  });
+
+  // The base outlives standalone runs until a `ralph-wiggum` seed archives it.
+  test("leaves .ralph/cycle-base in place", async () => {
+    await withTempRepo(() => {
+      installTemplates();
+      writeFileSync("IMPLEMENTATION_PLAN.md", PLAN);
+      mkdirSync(".ralph");
+      writeFileSync(".ralph/cycle-base", ". abc123\n");
+
+      expect(runMain({ ...process.env, INPUTS_MODE: "init" }).code).toBe(0);
+
+      expect(readFileSync(".ralph/cycle-base", "utf8")).toBe(". abc123\n");
+      expect(readdirSync(".ralph")).toEqual(["cycle-base"]);
     });
   });
 
