@@ -101,7 +101,7 @@ no inputs.
 
 There is no money bound, as in `ralph auto`: each phase is bounded by its iterations.
 
-To see the shape of a run before spending any of that, add `--dry-run` — the equivalent of ralph's
+To see the shape of a run before spending any iterations, add `--dry-run` — the equivalent of ralph's
 `ralph auto --dry-run`:
 
 ```bash
