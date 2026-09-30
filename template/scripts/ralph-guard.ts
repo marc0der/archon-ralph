@@ -4,21 +4,22 @@
  *
  * `until_bash` has two outcomes, complete and continue, and Archon fails a loop
  * node only when its `max_iterations` runs out. Two of ralph's conditions have
- * to stop the whole run from inside a loop: a push git rejects, and a review
- * pass that un-ticks a shipped item. Neither cap script can fail its own node,
- * so each writes `abort.txt` and completes the loop; this node is what turns
- * that marker into a non-zero exit. It is the only place a run fails for a
- * loop-side reason.
+ * to stop the whole run: a push git rejects, and a review pass that un-ticks a
+ * shipped item. Neither `ralph-build-cap` nor `ralph-review-exit` fails its own
+ * node, so each writes `abort.txt` and exits as if the phase ended; this node
+ * is what turns that marker into a non-zero exit. It is the only place a run
+ * fails for a phase-side reason.
  *
- * It runs twice per cycle, after `build` and after `review`, with
- * `trigger_rule: all_done` and `always_run: true`. That pair is what lets it
- * run when the loop it follows was skipped by a `when:` guard — in which case
- * there is no marker and it exits 0, which is also the ordinary outcome.
+ * Each build block runs it after the build loop, and the review block runs it
+ * after the review exit, with `trigger_rule: all_done` and `always_run: true`.
+ * That pair is what lets it run when the phase it follows was skipped by a
+ * `when:` guard — in which case there is no marker and it exits 0, which is
+ * also the ordinary outcome.
  *
  * The marker is never cleared here. `ralph-report` reads the same file to print
  * its `failed — <first line>` row, and nothing else touches it. The marker
  * lives in `ARTIFACTS_DIR`, which belongs to the run, while `ralph-seed` moves
- * only the two plan artifacts in the checkout — so an abort stays readable for
+ * the two plan artifacts and `.ralph/cycle-base` in the checkout — so an abort stays readable for
  * as long as Archon keeps the run's artifacts, and a mistaken `workflow resume`
  * fails at this guard again on the same marker (§12.2).
  *
