@@ -6,8 +6,8 @@ Guidance for coding agents (Claude Code and friends) working in this repository.
 
 archon-ralph packages the [ralph](https://github.com/marc0der/ralph) autonomous plan/build/review
 loop as an [Archon](https://archon.diy) workflow. `bunx archon-ralph init` copies `template/` into
-a target project's `.archon/`, where Archon drives the lifecycle: seed → plan loop → a
-`loop_group` fixpoint of build and review → report.
+a target project's `.archon/`, where Archon drives the lifecycle: seed → plan loop → build
+loop → review pass → build loop → report.
 
 This repository ships machinery, not an application. Nothing under `template/` runs here; it runs
 in the projects that install it.
