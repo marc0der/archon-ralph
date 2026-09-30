@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../template/scripts/ralph-review-exit.ts";
 import { writeCounter, writeCycleBase } from "../template/scripts/lib/ralph.ts";
@@ -135,12 +135,26 @@ describe("ralph-review-exit", () => {
   });
 
   test("reads ARTIFACTS_DIR from the environment", async () => {
-    await withTempRepo(({ artifactsDir }) => {
+    await withTempRepo(({ root }) => {
       writePlan(["- [x] **Shipped**"]);
+      const envArtifactsDir = join(root, "env-artifacts");
+      mkdirSync(envArtifactsDir);
+      const previous = process.env.ARTIFACTS_DIR;
+      process.env.ARTIFACTS_DIR = envArtifactsDir;
+      try {
+        const { log } = console;
+        console.log = () => {};
+        try {
+          expect(main()).toBe(0);
+        } finally {
+          console.log = log;
+        }
+      } finally {
+        if (previous === undefined) delete process.env.ARTIFACTS_DIR;
+        else process.env.ARTIFACTS_DIR = previous;
+      }
 
-      expect(runMain(process.env).code).toBe(0);
-
-      expect(outcome(artifactsDir)).toHaveLength(1);
+      expect(outcome(envArtifactsDir)).toHaveLength(1);
     });
   });
 
