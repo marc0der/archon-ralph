@@ -60,35 +60,20 @@ function outcomeLines(artifactsDir: string): string[] {
 }
 
 describe("settingsFromInputs", () => {
-  test("defaults to no skipped push and a cap of 3", () => {
-    expect(settingsFromInputs({})).toEqual({ skip_push: false, cycle_cap: 3 });
+  test("defaults to no skipped push", () => {
+    expect(settingsFromInputs({})).toEqual({ skip_push: false });
   });
 
-  test("reads both inputs from the INPUTS_* strings Archon exports", () => {
+  test("reads skip_push from the INPUTS_* string Archon exports", () => {
     // Every INPUTS_* value arrives as a string; `false` is `"false"`, not a boolean.
-    expect(settingsFromInputs({ INPUTS_SKIP_PUSH: "true", INPUTS_CYCLE_CAP: "2" })).toEqual({
-      skip_push: true,
-      cycle_cap: 2,
-    });
-    expect(settingsFromInputs({ INPUTS_SKIP_PUSH: "false", INPUTS_CYCLE_CAP: "10" })).toEqual({
-      skip_push: false,
-      cycle_cap: 10,
-    });
+    expect(settingsFromInputs({ INPUTS_SKIP_PUSH: "true" })).toEqual({ skip_push: true });
+    expect(settingsFromInputs({ INPUTS_SKIP_PUSH: "false" })).toEqual({ skip_push: false });
   });
 
   test("treats any non-`true` skip_push as false", () => {
     for (const value of ["", "False", "1", "yes", "TRUE"]) {
       expect(settingsFromInputs({ INPUTS_SKIP_PUSH: value }).skip_push).toBe(false);
     }
-  });
-
-  test("falls back to 3 for a cycle_cap that is not a usable integer", () => {
-    // A `NaN` or `0` cap would make `cycles >= cycle_cap` decide the fixpoint by
-    // accident — either never, or before the first cycle finishes.
-    for (const value of ["", "0", "-1", "1.5", "two", "3 cycles"]) {
-      expect(settingsFromInputs({ INPUTS_CYCLE_CAP: value }).cycle_cap).toBe(3);
-    }
-    expect(settingsFromInputs({ INPUTS_CYCLE_CAP: "1" }).cycle_cap).toBe(1);
   });
 });
 
@@ -107,7 +92,10 @@ describe("ralph-seed run state", () => {
 
       // The round trip is the contract: the writer and `readSettings` are the
       // two halves of the only channel the cap scripts have.
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 2 });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true });
+      expect(JSON.parse(readFileSync(join(artifactsDir, "settings.json"), "utf8"))).toEqual({
+        skip_push: true,
+      });
     });
   });
 
@@ -116,7 +104,7 @@ describe("ralph-seed run state", () => {
       installTemplates();
       expect(runMain()).toBe(0);
 
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: false, cycle_cap: 3 });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: false });
       expect(readFileSync(join(artifactsDir, "settings.json"), "utf8")).toEndWith("\n");
     });
   });
@@ -243,36 +231,43 @@ describe("ralph-seed init mode run state", () => {
 });
 
 describe("mergeSettings", () => {
-  // The case §12.4 introduces the merge for: `seed` wrote the cap, and the
-  // build block's `init` adds `skip_push` beside it. `settingsFromInputs`
-  // would substitute its own default of 3 and change when the fixpoint stops.
-  test("adds skip_push to a settings.json holding cycle_cap alone", async () => {
+  test("replaces skip_push with the input this node was given", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
-      writeFileSync(join(artifactsDir, "settings.json"), `${JSON.stringify({ cycle_cap: 7 })}\n`);
+      writeFileSync(join(artifactsDir, "settings.json"), `${JSON.stringify({ skip_push: false })}\n`);
 
       mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "true" });
 
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 7 });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true });
     });
   });
 
   // An input the node does not declare arrives absent, not as a default, so
   // it must not displace the value already in the file.
-  test("leaves a key alone when its input is absent or unusable", async () => {
+  test("leaves skip_push alone when its input is absent or blank", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       const file = join(artifactsDir, "settings.json");
-      writeFileSync(file, `${JSON.stringify({ skip_push: true, cycle_cap: 7 })}\n`);
+      writeFileSync(file, `${JSON.stringify({ skip_push: true })}\n`);
 
       mergeSettings(artifactsDir, {});
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 7 });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true });
 
-      mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "", INPUTS_CYCLE_CAP: "0" });
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 7 });
+      mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "" });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true });
+    });
+  });
+
+  test("writes no cycle_cap, whatever the inputs", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "true", INPUTS_CYCLE_CAP: "2" });
+
+      expect(JSON.parse(readFileSync(join(artifactsDir, "settings.json"), "utf8"))).toEqual({
+        skip_push: true,
+      });
     });
   });
 
   // Standalone there is no `seed`, so the file starts missing and `init` is
-  // what creates it. `readSettings` falls back per field for the rest.
+  // what creates it.
   test("writes the named inputs alone when the file is missing", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       mergeSettings(artifactsDir, { INPUTS_SKIP_PUSH: "true" });
@@ -280,7 +275,7 @@ describe("mergeSettings", () => {
       expect(JSON.parse(readFileSync(join(artifactsDir, "settings.json"), "utf8"))).toEqual({
         skip_push: true,
       });
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 3 });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true });
     });
   });
 });

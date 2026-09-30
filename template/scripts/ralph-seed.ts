@@ -133,18 +133,10 @@ export function ignoreArtifacts(): void {
 
 /**
  * The workflow inputs, as Archon hands them to an exec node: every `INPUTS_*`
- * value is a string, so `false` arrives as `"false"` and a cap of 3 as `"3"`.
- *
- * Validation mirrors `readSettings`, which reads this file back: `cycle_cap`
- * must be an integer of at least 1, because a `NaN` or `0` cap makes
- * `cycles >= cycle_cap` decide the fixpoint by accident rather than by input.
+ * value is a string, so `false` arrives as `"false"`.
  */
 export function settingsFromInputs(env = process.env): Settings {
-  const cap = Number(env.INPUTS_CYCLE_CAP);
-  return {
-    skip_push: env.INPUTS_SKIP_PUSH === "true",
-    cycle_cap: Number.isInteger(cap) && cap >= 1 ? cap : 3,
-  };
+  return { skip_push: env.INPUTS_SKIP_PUSH === "true" };
 }
 
 /**
@@ -152,15 +144,12 @@ export function settingsFromInputs(env = process.env): Settings {
  * every other key as it was found.
  *
  * `init` merges where `archive` overwrites (§12.4): inside `ralph-wiggum` the
- * file already holds the `cycle_cap` `seed` wrote, and the build block's `init`
- * adds `skip_push` to it. `settingsFromInputs` would instead substitute its own
- * default for whichever input that node does not declare, and a `cycle_cap`
- * silently reset to 3 changes when the fixpoint stops.
+ * file already holds what `seed` wrote, and a block's `init` overlays only the
+ * inputs it declares. `settingsFromInputs` would instead substitute its own
+ * default for an input the node does not declare.
  *
- * An input that is absent, blank or unusable is treated as not given rather
- * than as a default, so it cannot displace a good value already in the file.
- * Writing a file that holds one key alone is safe: `readSettings` falls back
- * per field.
+ * An input that is absent or blank is treated as not given rather than as a
+ * default, so it cannot displace a good value already in the file.
  */
 export function mergeSettings(artifactsDir: string, env = process.env): void {
   const file = join(artifactsDir, "settings.json");
@@ -177,8 +166,6 @@ export function mergeSettings(artifactsDir: string, env = process.env): void {
   if (env.INPUTS_SKIP_PUSH !== undefined && env.INPUTS_SKIP_PUSH !== "") {
     merged.skip_push = env.INPUTS_SKIP_PUSH === "true";
   }
-  const cap = Number(env.INPUTS_CYCLE_CAP);
-  if (Number.isInteger(cap) && cap >= 1) merged.cycle_cap = cap;
 
   writeFileSync(file, `${JSON.stringify(merged)}\n`);
 }
