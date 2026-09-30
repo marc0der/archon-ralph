@@ -186,16 +186,22 @@ function gitRepos(dir: string, depth: number, out: string[]): void {
   }
 }
 
-function headSha(repo: string): string {
+/** `git -C <repo> <args>` as lines, or nothing when git fails: ralph's `2>/dev/null`. */
+function gitLines(repo: string, args: string[]): string[] {
   try {
-    const sha = execFileSync("git", ["-C", repo, "rev-parse", "-q", "--verify", "HEAD"], {
+    return execFileSync("git", ["-C", repo, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-    return sha || "-";
+    })
+      .split("\n")
+      .filter((line) => line !== "");
   } catch {
-    return "-";
+    return [];
   }
+}
+
+function headSha(repo: string): string {
+  return gitLines(repo, ["rev-parse", "-q", "--verify", "HEAD"])[0] ?? "-";
 }
 
 /**
@@ -242,6 +248,50 @@ export function writeCycleBase(): boolean {
   mkdirSync(dirname(CYCLE_BASE), { recursive: true });
   writeFileSync(CYCLE_BASE, repoState());
   return true;
+}
+
+/** A `repoState()` listing as `[repo, sha]` pairs. */
+function parseRepoState(listing: string): [string, string][] {
+  return listing
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => {
+      const space = line.lastIndexOf(" ");
+      return [line.slice(0, space), line.slice(space + 1)];
+    });
+}
+
+/**
+ * The distinct paths the cycle changed, relative to the workspace root, in
+ * byte order; `[]` without a base. Mirrors ralph's `cycle_changed_files`.
+ *
+ * A repository commitless at the base, or created after it, counts every
+ * tracked file: it has no sha to diff from.
+ */
+export function cycleChangedFiles(): string[] {
+  let base: string;
+  try {
+    base = readFileSync(CYCLE_BASE, "utf8");
+  } catch {
+    return [];
+  }
+  const changed = new Set<string>();
+  const collect = (repo: string, paths: string[]) => {
+    for (const path of paths) changed.add(`${repo}/${path}`.replace(/^\.\//, ""));
+  };
+
+  const baseRepos = parseRepoState(base);
+  for (const [repo, sha] of baseRepos) {
+    collect(
+      repo,
+      sha === "-" ? gitLines(repo, ["ls-files"]) : gitLines(repo, ["diff", "--name-only", sha, "HEAD"]),
+    );
+  }
+  const known = new Set(baseRepos.map(([repo]) => repo));
+  for (const [repo] of parseRepoState(repoState())) {
+    if (!known.has(repo)) collect(repo, gitLines(repo, ["ls-files"]));
+  }
+  return [...changed].sort(byteOrder);
 }
 
 /* ── Run state: the files the cap scripts carry between iterations ────────── */
