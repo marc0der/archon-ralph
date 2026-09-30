@@ -35,7 +35,7 @@ const WORKFLOWS = join(TEMPLATE, "workflows");
 /** The composing lifecycle: the only file with a `loop_group` and a `seed`. */
 const LIFECYCLE = "ralph-wiggum.yaml";
 
-/** The phase file whose `snapshot` node carries the review guard. */
+/** The phase file whose `review` node is the one review pass. */
 const REVIEW = "ralph-review.yaml";
 
 /** The phase file whose `snapshot` node carries the build guard. */
@@ -159,7 +159,13 @@ function declares(entry: Parsed, key: string): boolean {
 }
 
 /** The scripts that route on `INPUTS_MODE` and default an absent value. */
-const MODE_DRIVEN = ["ralph-precondition", "ralph-seed", "ralph-snapshot", "ralph-report"];
+const MODE_DRIVEN = [
+  "ralph-precondition",
+  "ralph-seed",
+  "ralph-snapshot",
+  "ralph-counts",
+  "ralph-report",
+];
 
 /** The `with:` block of a node, or an empty map for a node declaring none. */
 function withOf(node: Yaml): Yaml {
@@ -325,20 +331,27 @@ describe("the workflow definitions", () => {
     });
   });
 
-  test("the review guard names open, shipped and cited", async () => {
+  test("review is one command pass followed by the exit node", async () => {
     await withTempRepo(() => {
       const review = parsed.find((entry) => entry.file === REVIEW);
       expect(review).toBeDefined();
 
-      // spec-anchored-review §3: the fourth review precondition is a third
-      // term in this one expression and nothing else. Without it the phase
-      // audits a plan that cites no specification — the anchor set is empty,
-      // so a pass has no standard to measure the tree against and reports a
-      // clean audit of nothing. The whole expression is pinned because a term
-      // dropped from it reads at run time as a guard that simply passed.
-      expect({ file: REVIEW, when: review?.byId.get("snapshot")?.node["when"] }).toEqual({
+      // one-shot-review §3.4: ralph reviews once per cycle. A `loop:` here
+      // would bring back the fixpoint, and an exit node reached some other
+      // way would print an exit line for a pass that never ran.
+      const node = review?.byId.get("review")?.node ?? {};
+      expect({ file: REVIEW, command: node["command"], loop: loopOf(node) }).toEqual({
         file: REVIEW,
-        when: "$counts.output.open == 0 && $counts.output.shipped > 0 && $counts.output.cited > 0",
+        command: "ralph-review",
+        loop: null,
+      });
+      expect({ file: REVIEW, with: review?.byId.get("counts")?.node["with"] }).toEqual({
+        file: REVIEW,
+        with: { mode: "review" },
+      });
+      expect({ file: REVIEW, depends_on: review?.byId.get("exit")?.node["depends_on"] }).toEqual({
+        file: REVIEW,
+        depends_on: ["review"],
       });
     });
   });
@@ -422,11 +435,11 @@ describe("the workflow definitions", () => {
     });
   });
 
-  test("every loop command names a file under template/commands/", async () => {
+  test("every command names a file under template/commands/", async () => {
     await withTempRepo(() => {
       const commands = parsed.flatMap(({ file, placed }) =>
         placed.flatMap((entry) => {
-          const command = loopOf(entry.node)?.["command"];
+          const command = entry.node["command"] ?? loopOf(entry.node)?.["command"];
           return typeof command === "string" ? [{ file, id: entry.id, command }] : [];
         }),
       );
@@ -434,10 +447,45 @@ describe("the workflow definitions", () => {
       // A total: the lifecycle's `cycle` node is a `loop_group` with no command
       // of its own, so a per-file count would assert the wrong thing there.
       expect(commands.length).toBeGreaterThan(0);
+      expect(commands.map(({ file, id }) => `${file}: ${id}`)).toContain(`${REVIEW}: review`);
       expect(
         commands
           .filter(({ command }) => !existsSync(resolve("commands", command, ".md")))
           .map(({ file, id, command }) => `${file}: ${id} → ${command}`),
+      ).toEqual([]);
+    });
+  });
+
+  test("the review exit declares no trigger_rule", async () => {
+    await withTempRepo(() => {
+      const review = parsed.find((entry) => entry.file === REVIEW);
+      const exit = review?.byId.get("exit");
+      expect(exit).toBeDefined();
+      // one-shot-review §3.4: `exit` must be skipped with the pass it follows.
+      // A join rule here would append an exit line for a review that never ran.
+      expect({ id: "exit", trigger_rule: exit?.node["trigger_rule"] }).toEqual({
+        id: "exit",
+        trigger_rule: undefined,
+      });
+    });
+  });
+
+  test("every snapshot guard reads the run verdict of counts", async () => {
+    await withTempRepo(() => {
+      const guarded = parsed.flatMap(({ file, placed }) =>
+        placed
+          .filter((entry) => entry.node["script"] === "ralph-snapshot")
+          .filter((entry) => typeof entry.node["when"] === "string")
+          .map((entry) => ({ at: `${file}: ${entry.id}`, when: String(entry.node["when"]) })),
+      );
+
+      // one-shot-review §4.1: `ralph-counts` owns every skip predicate and
+      // writes the skip row, so a guard on the raw counts could pass where
+      // the script already logged a skip. The build and review blocks each
+      // guard one snapshot.
+      expect(guarded.length).toBeGreaterThanOrEqual(2);
+      expect(
+        guarded.filter(({ when }) => !when.includes("$counts.output.run")).map(({ at }) => at),
       ).toEqual([]);
     });
   });
