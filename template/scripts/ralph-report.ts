@@ -86,7 +86,7 @@ export function parseOutcome(log: string): (string | null)[] {
   return rows;
 }
 
-/** A block report's row. The state column sits at column 11, as ralph's `%-9s` puts it. */
+/** A block report's row: the label and the state column, with no phase number. */
 function topRow(label: string, state: string): string {
   return `  ${label.padEnd(9)}${state}`;
 }
@@ -222,10 +222,8 @@ export function lastRow(log: string, label: string): string | null {
 /**
  * One phase block's report: its last row, then the plan counts.
  *
- * The row goes through the same `topRow` and `phaseState` as the summary, so
- * the interim lines a composed run prints line up with the summary that
- * follows them. A block that wrote no row failed before its gate, so it is
- * `not reached`.
+ * The row shares `phaseState` with the summary and omits the phase number. A
+ * block that wrote no row failed before its gate, so it is `not reached`.
  */
 function phaseReport(artifactsDir: string, label: string): string[] {
   const line = lastRow(readArtifact(artifactsDir, "outcome.log"), label);
