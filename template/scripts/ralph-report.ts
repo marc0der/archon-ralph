@@ -37,7 +37,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { repoState } from "./lib/ralph.ts";
+import { parseRepoState, repoState } from "./lib/ralph.ts";
 import { counts } from "./ralph-counts.ts";
 
 /** The lifecycle summary, then one mode per phase workflow (§12.4). */
@@ -142,17 +142,6 @@ function firstLine(text: string): string | null {
 
 /* ── The repositories a run moved ─────────────────────────────────────────── */
 
-/** A `<path> <sha>` listing, keyed by path, as `repoState` writes it. */
-function parseRepoState(text: string): Map<string, string> {
-  const shas = new Map<string, string>();
-  for (const line of text.split("\n")) {
-    // The sha is the last field, so a repository path with a space parses too.
-    const space = line.lastIndexOf(" ");
-    if (space > 0) shas.set(line.slice(0, space), line.slice(space + 1));
-  }
-  return shas;
-}
-
 /**
  * How far one repository moved: the commits it gained, or the bare word
  * `moved` where no count can be taken (§4.2).
@@ -186,7 +175,7 @@ function movement(repo: string, start: string, now: string): string {
  * has none to count.
  */
 export function movedRepos(artifactsDir: string): string[] {
-  const started = parseRepoState(readArtifact(artifactsDir, "run-start.txt"));
+  const started = new Map(parseRepoState(readArtifact(artifactsDir, "run-start.txt")));
   const rows: string[] = [];
   for (const [repo, now] of parseRepoState(repoState())) {
     const start = started.get(repo) ?? "-";
