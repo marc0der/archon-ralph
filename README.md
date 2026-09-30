@@ -95,17 +95,11 @@ points behave alike.
 | Input | Default | Meaning |
 |---|---|---|
 | `--input skip_push=true` | `false` | Keep every commit local; the build loop never pushes. |
-| `--input cycle_cap=2` | `3` | Stop after this many build/review cycles, open items or not. |
 
-`skip_push` is declared by `ralph-build` and `ralph-wiggum`, `cycle_cap` by `ralph-wiggum` alone;
-`ralph-plan` and `ralph-review` take no inputs.
+`skip_push` is declared by `ralph-build` and `ralph-wiggum`; `ralph-plan` and `ralph-review` take
+no inputs.
 
-Keep `cycle_cap` below the cycle's `max_iterations` of 20. That ceiling is Archon's safety net and
-exhausting it **fails** the run, where reaching `cycle_cap` ends it cleanly with a report.
-
-`cycle_cap` bounds the cycles; the cycle node's `maxBudgetUsd` bounds the money. The `50` in
-`ralph-wiggum.yaml` is a placeholder — raise or lower it to what a run is worth to you, because
-exceeding it **fails** the run.
+There is no money bound, as in `ralph auto`: each phase is bounded by its iterations.
 
 To see the shape of a run before spending any of that, add `--dry-run` — the equivalent of ralph's
 `ralph auto --dry-run`:
@@ -129,9 +123,10 @@ Run a cycle yourself first:
 2. `archon workflow run ralph-build --input skip_push=true`, then read the commits. This is what
    tells you whether your `CLAUDE.md` or `AGENTS.md` names the right test command, and
    `skip_push=true` keeps the branch local while you find out.
-3. `archon workflow run ralph-review`, once build has emptied the plan. A `Minor` citing a rule
-   file is the tier working as designed; findings about style or taste with no written rule behind
-   them mean the prompts need work, not more iterations.
+3. `archon workflow run ralph-review`, once build has emptied the plan. `ralph-build` records the
+   cycle base in `.ralph/cycle-base` and `ralph-review` reads it to scope the cycle's work; delete
+   `.ralph/cycle-base` to start a new cycle. A finding that names no spec clause, no rule and no
+   catalogue kind means the prompts need work, not more iterations.
 4. Tune the prompts in `.archon/commands/`. Iterate on those, not on the loop.
 
 Each step leaves the plan and the log in the tree for the next one to pick up: the phase workflows
@@ -214,12 +209,11 @@ the supported path rather than as containment.
     ├── ralph-precondition.ts       # refuse a goalless, detached or non-repo run
     ├── ralph-seed.ts               # archive the last cycle, scaffold, ignore
     ├── ralph-snapshot.ts           # reset a phase's counters and fingerprints
-    ├── ralph-counts.ts             # open / shipped / superseded / cited, for the guards
+    ├── ralph-counts.ts             # the phase gate: counts, the guard and the skip row
     ├── ralph-guard.ts              # fail the run on a cap script's abort marker
     ├── ralph-plan-cap.ts           # plan loop: converge or cap
     ├── ralph-build-cap.ts          # build loop: exhaust, noop, budget, push
-    ├── ralph-review-cap.ts         # review loop: converge or cap
-    ├── ralph-cycle-cap.ts          # the fixpoint: zero open items or cycle_cap
+    ├── ralph-review-exit.ts        # the review exit line and the un-tick guard
     └── ralph-report.ts             # the closing summary
 ```
 
@@ -228,7 +222,7 @@ runtime dependencies. `bun install` inside it is optional — it only pulls
 `@types/bun` for editor/type-check DX.
 
 The three prompts under `commands/` are ralph's `prompts/plan.md`, `build.md` and `review.md` at
-`marc0der/ralph@f6d2405`, carrying only the substitutions this workflow needs. Each one records
+`marc0der/ralph@a0ac4fd`, carrying only the substitutions this workflow needs. Each one records
 that baseline in its `source:` frontmatter line — check it before porting a change from upstream.
 
 ## License
