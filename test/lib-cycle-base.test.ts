@@ -120,11 +120,11 @@ describe("cycleChangedFiles", () => {
       writeCycleBase();
       const base = readFileSync(CYCLE_BASE, "utf8");
       writeFileSync(CYCLE_BASE, base + base);
-      commit(root, "z", "B");
+      commit(root, "z", "B", "a", "Z");
       commit(svc, "a");
 
-      // The root's paths are collected first; byte order puts `B` before `svc/`.
-      expect(cycleChangedFiles()).toEqual(["B", "svc/a", "z"]);
+      // The root's paths are collected first; byte order puts upper case before lower case and `B` before `svc/`.
+      expect(cycleChangedFiles()).toEqual(["B", "Z", "a", "svc/a", "z"]);
     });
   });
 

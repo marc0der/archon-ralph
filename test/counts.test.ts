@@ -125,9 +125,16 @@ describe("ralph-counts", () => {
   });
 
   test("base is whether .ralph/cycle-base exists", async () => {
-    await withTempRepo(() => {
+    await withTempRepo(({ artifactsDir }) => {
       writePlan(["- [x] **Shipped one**"]);
       expect(counts().base).toBe(false);
+
+      // The directory alone is no base: `.ralph/` holds other state before `cycle-base` lands.
+      mkdirSync(".ralph");
+      expect(runMain({ ARTIFACTS_DIR: artifactsDir, INPUTS_MODE: "review" })).toMatchObject({
+        json: { base: false, run: false },
+      });
+      expect(outcomeRows(artifactsDir)).toEqual(["review: skipped — no cycle base"]);
 
       writeBase();
       expect(counts().base).toBe(true);
