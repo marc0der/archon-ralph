@@ -1,15 +1,15 @@
 name: ralph-review
 description: |
   Use when: User wants only the REVIEW phase of the Ralph Wiggum lifecycle —
-            audit the specifications IMPLEMENTATION_PLAN.md's items cite, and
-            build nothing.
+            review the cycle's work in one pass, and build nothing.
   Triggers: "ralph review", "review the plan", "audit what ralph shipped".
-  Does: Audits the cited specs against the code with a fresh context per pass,
-        files each finding as a new plan item, and stops on a pass that files
-        nothing or at ralph's cap of 6 passes. Ends with the review row and
-        the plan counts. Implements nothing, commits nothing and pushes
-        nothing. A plan with open items, nothing shipped or no cited spec is
-        skipped and reported, not an error.
+  Does: Reviews the cycle's work in one pass with a fresh context — the specs
+        the plan's items cite and every file changed since the cycle base —
+        and files each finding as a new plan item. Ends with ralph's exit line
+        (findings filed, specs reviewed, changed files) and the plan counts.
+        Implements nothing, commits nothing and pushes nothing. A plan with
+        open items, nothing shipped or no cycle base is skipped and reported,
+        not an error.
   NOT for: Writing the plan (ralph-plan), implementing it (ralph-build), or the
            whole lifecycle (ralph-wiggum).
 
@@ -63,23 +63,26 @@ nodes:
     always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
-  # REVIEW — audit the specs the plan's items cite and file findings as
-  # new plan items. Guarded on nothing open, something shipped and at least
-  # one cited spec, so a plan still being built is left to a build rather
-  # than audited half-done, and a plan anchored on nothing is never audited
-  # against nothing. The cap aborts a pass that un-ticks an item; the guard
-  # fails the run on it. The join rule on the guard is what lets it run
-  # after a loop that was skipped as well as after one that ran.
+  # REVIEW — one pass over the cycle's work, filing findings as new plan
+  # items. Guarded on ralph-counts' `run`: nothing open, something shipped
+  # and a cycle base, .ralph/cycle-base, so a plan still being built is left
+  # to a build and a review always has a range to read; a false guard writes
+  # the skip row. The exit node appends ralph's exit line — findings filed,
+  # specs reviewed, changed files — or aborts a pass that un-ticked an item,
+  # and the guard fails the run on it. `exit` has no join rule, so it is
+  # skipped with the pass; the guard's join rule is what lets it run either
+  # way.
   # ═══════════════════════════════════════════════════════════════════════
   - id: counts
     depends_on: [init]
     script: ralph-counts
     runtime: bun
+    with: { mode: review }
     always_run: true
 
   - id: snapshot
     depends_on: [counts]
-    when: "$counts.output.open == 0 && $counts.output.shipped > 0 && $counts.output.cited > 0"
+    when: "$counts.output.run == true"
     script: ralph-snapshot
     runtime: bun
     with: { mode: review }
@@ -88,14 +91,16 @@ nodes:
   - id: review
     depends_on: [snapshot]
     idle_timeout: 600000
-    loop:
-      command: ralph-review
-      max_iterations: 7
-      fresh_context: true
-      until_bash: bun run .archon/scripts/ralph-review-cap.ts "$ARTIFACTS_DIR"
+    command: ralph-review
+
+  - id: exit
+    depends_on: [review]
+    script: ralph-review-exit
+    runtime: bun
+    always_run: true
 
   - id: guard
-    depends_on: [review]
+    depends_on: [exit]
     trigger_rule: all_done
     script: ralph-guard
     runtime: bun
@@ -104,11 +109,11 @@ nodes:
   # ═══════════════════════════════════════════════════════════════════════
   # REPORT — the review row and the plan counts, from outcome.log and the
   # plan. The join rule is what makes it print on every exit path: a failed
-  # precondition, init or review loop still reports. Read-only, and exits 0
+  # precondition, init or review pass still reports. Read-only, and exits 0
   # even after an abort — the guard already failed the run.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
-    depends_on: [precondition, init, counts, snapshot, review, guard]
+    depends_on: [precondition, init, counts, snapshot, review, exit, guard]
     trigger_rule: all_done
     script: ralph-report
     runtime: bun

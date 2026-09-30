@@ -1,6 +1,6 @@
 /**
- * The two fingerprints (spec §9). `planStateHash` decides when the plan and
- * review loops have converged, and `repoState` decides whether a build
+ * The two fingerprints (spec §9). `planStateHash` decides when the plan loop
+ * has converged, and `repoState` decides whether a build
  * iteration did anything at all — so a fingerprint that misses a change ends a
  * run that was still making progress. Every case below is a change that must
  * register, or a non-change that must not.
