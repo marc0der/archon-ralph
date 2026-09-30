@@ -251,12 +251,14 @@ describe("ralph-report", () => {
     });
   });
 
-  test("parses one row per phase slot and drops lines with no phase prefix", () => {
-    expect(
-      parseOutcome(
-        "seed: nothing to archive\nplan: converged on pass 1\nbuild: push rejected\ngit said no\n",
-      ),
-    ).toEqual(["seed: nothing to archive", "plan: converged on pass 1", "build: push rejected", null, null]);
+  test("parses one row per phase slot and drops lines with no phase prefix", async () => {
+    await withTempRepo(() => {
+      expect(
+        parseOutcome(
+          "seed: nothing to archive\nplan: converged on pass 1\nbuild: push rejected\ngit said no\n",
+        ),
+      ).toEqual(["seed: nothing to archive", "plan: converged on pass 1", "build: push rejected", null, null]);
+    });
   });
 });
 
