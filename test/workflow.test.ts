@@ -32,7 +32,7 @@ import { withTempRepo } from "./helpers.ts";
 const TEMPLATE = join(import.meta.dir, "../template");
 const WORKFLOWS = join(TEMPLATE, "workflows");
 
-/** The composing lifecycle: the only file with a `loop_group` and a `seed`. */
+/** The composing lifecycle: the only file with a `seed`. */
 const LIFECYCLE = "ralph-wiggum.yaml";
 
 /** The phase file whose `review` node is the one review pass. */
@@ -234,15 +234,17 @@ describe("the workflow definitions", () => {
     });
   });
 
-  test("the walk descends into the cycle body", async () => {
+  test("the lifecycle runs six fixed phases with no cycle group", async () => {
     await withTempRepo(() => {
-      // More placed nodes than top-level ones proves the walk entered the
-      // `loop_group` body. Were `bodyOf` to return nothing, every assertion
-      // here would pass over the outer nodes and audit nothing. §12.7: the
-      // lifecycle is the only file with a body to descend into, so it is the
-      // only file that can prove the descent happened.
-      expect(lifecycle.placed.length).toBeGreaterThan(lifecycle.topLevel.length);
-      expect(lifecycle.placed.map((entry) => entry.id)).toContain("build");
+      // one-shot-review §3.1: ralph's `auto` runs one cycle and stops, so a
+      // `loop_group`, a `cycle_cap` input or a `maxBudgetUsd` bound would
+      // bring back the fixpoint. The second build is the `fix` block.
+      const ids = (keep: (node: Yaml) => boolean) =>
+        lifecycle.placed.filter((entry) => keep(entry.node)).map((entry) => entry.id);
+      expect(ids((node) => loopOf(node) !== null)).toEqual([]);
+      expect(ids((node) => node["maxBudgetUsd"] !== undefined)).toEqual([]);
+      expect(inputsOf(lifecycle)).toEqual(["skip_push"]);
+      expect(ids((node) => node["include"] === "ralph-build")).toEqual(["build", "fix"]);
     });
   });
 
@@ -323,7 +325,7 @@ describe("the workflow definitions", () => {
       // The rule is owed only to a loop that can be skipped, so the check
       // below is vacuous unless some loop is. A total stands in for the literal
       // node list §9 used to name: the phase files each guard their own loop,
-      // so the same shape now appears four times over with different ids.
+      // so the same shape appears once per guarded loop with different ids.
       expect(following.length).toBeGreaterThan(0);
       expect(
         following.filter(({ node }) => node["trigger_rule"] !== "all_done").map(({ at }) => at),
@@ -375,9 +377,9 @@ describe("the workflow definitions", () => {
     });
   });
 
-  test("build and review declare no trigger_rule", async () => {
+  test("build, review and fix declare no trigger_rule", async () => {
     await withTempRepo(() => {
-      for (const id of ["build", "review"]) {
+      for (const id of ["build", "review", "fix"]) {
         const entry = lifecycle.byId.get(id);
         expect(entry).toBeDefined();
         // §3.1: a false guard must skip the phase itself. A join rule here
@@ -444,8 +446,8 @@ describe("the workflow definitions", () => {
         }),
       );
 
-      // A total: the lifecycle's `cycle` node is a `loop_group` with no command
-      // of its own, so a per-file count would assert the wrong thing there.
+      // A total: the lifecycle declares only includes and scripts, so a
+      // per-file count would assert the wrong thing there.
       expect(commands.length).toBeGreaterThan(0);
       expect(commands.map(({ file, id }) => `${file}: ${id}`)).toContain(`${REVIEW}: review`);
       expect(

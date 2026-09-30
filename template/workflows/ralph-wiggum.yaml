@@ -4,13 +4,12 @@ description: |
             lifecycle (a port of marc0der/ralph) on this project.
   Triggers: "ralph wiggum", "run ralph", "ralph loop", "ralph plan/build".
   Does: Archives the previous cycle's artifacts to .ralph/<timestamp>/, seeds
-        IMPLEMENTATION_PLAN.md and PROGRESS.md from the templates, runs the
-        PLAN loop to convergence, then repeats build-to-exhaustion and review
-        as one cycle — each BUILD iteration implements one plan item with a
-        fresh context, tests, commits and pushes; each REVIEW iteration audits
-        the cited specs and files findings as new plan items — cycling again
-        while open items remain, and stopping when a review pass files nothing
-        or the cycle cap is reached. Ends with a factual lifecycle report.
+        IMPLEMENTATION_PLAN.md and PROGRESS.md from the templates, then runs
+        ralph's fixed phases once each: PLAN to convergence, BUILD to
+        exhaustion — each iteration implements one plan item with a fresh
+        context, tests, commits and pushes — REVIEW once over the cycle's work,
+        filing findings as new plan items, and BUILD again to fix them.
+        Nothing reviews the second build. Ends with a factual lifecycle report.
   NOT for: PR reviews, one-off fixes, or PRD/story-driven work.
 
 # The goal is the positional message: `archon workflow run ralph-wiggum "<goal>"`.
@@ -21,7 +20,8 @@ description: |
 # model. Drop to `sonnet` for faster, cheaper iterations.
 #
 # The three phases live in ralph-plan.yaml, ralph-build.yaml and
-# ralph-review.yaml and are inlined here with `include:`. Archon writes an
+# ralph-review.yaml and are inlined here with `include:`, ralph-build.yaml
+# twice. Archon writes an
 # included file's provider, model and sandbox onto its own nodes before
 # inlining them, so the blocks below run under the PHASE file's provider, model
 # and sandbox — not under these. All four files therefore carry the same values
@@ -54,9 +54,6 @@ inputs:
   skip_push:
     default: false
     description: Do not push the workspace after a build iteration.
-  cycle_cap:
-    default: 3
-    description: Maximum build-review cycles before the run stops.
 
 nodes:
   # ═══════════════════════════════════════════════════════════════════════
@@ -83,7 +80,7 @@ nodes:
   # `init` mode, which scaffolds only what is absent and merges its inputs
   # into the settings this node wrote, so the plan a block is about to build
   # is never filed away mid-run. A node's `with:` merges over the run's
-  # inputs, so skip_push and cycle_cap still reach this node's environment.
+  # inputs, so skip_push still reaches this node's environment.
   #
   # The one exception to the always_run rule: archiving must not repeat
   # within a run, so a resume reuses the cached output and leaves the live
@@ -110,52 +107,59 @@ nodes:
     include: ralph-plan
 
   # ═══════════════════════════════════════════════════════════════════════
-  # CYCLE — one iteration is one ralph cycle: build to exhaustion, then
-  # review. The group completes when the plan holds no open items or the
-  # cycle cap is reached. maxBudgetUsd is the money bound; max_iterations is
-  # a ceiling cycle_cap must stay below.
+  # BUILD — implement the plan to exhaustion, one item per iteration. The
+  # block is ralph-build.yaml inlined, namespaced `build__<node-id>`; a plan
+  # with no open items skips it and writes the skip row. Its snapshot records
+  # the cycle base, .ralph/cycle-base, which the review below reads.
   #
-  # The body is the two phase files inlined. Each keeps its own counts node,
-  # `when:` guard, snapshot, cap script and guard, so a build with nothing
-  # open and a review with nothing shipped or no cited spec skip and report
-  # exactly as they do standalone. `review` depends on `build`, which waits
-  # on every sink of the build block, and `report` is that block's only sink
-  # — `guard` precedes it, as every other node does. `report` declares
-  # `trigger_rule: all_done` and so always completes, whatever the guard
-  # exited with. A rejected push therefore does not stop the cycle before the
-  # audit: the review block runs, and its own `guard` reads the same
-  # abort.txt and fails the run again.
+  # skip_push is the one input a block reads. It reaches the build cap
+  # through settings.json, which the block's `init` merges it into; the
+  # expander substitutes this run's value at load time.
   # ═══════════════════════════════════════════════════════════════════════
-  - id: cycle
+  - id: build
     depends_on: [plan]
-    maxBudgetUsd: 50
-    loop_group:
-      max_iterations: 20
-      until_bash: bun run .archon/scripts/ralph-cycle-cap.ts "$ARTIFACTS_DIR"
-      nodes:
-        # skip_push is the one input a block reads. It reaches the build cap
-        # through settings.json, which the block's `init` merges it into;
-        # the expander substitutes this run's value at load time.
-        - id: build
-          include: ralph-build
-          with: { skip_push: "$INPUTS.skip_push" }
+    include: ralph-build
+    with: { skip_push: "$INPUTS.skip_push" }
 
-        - id: review
-          depends_on: [build]
-          include: ralph-review
+  # ═══════════════════════════════════════════════════════════════════════
+  # REVIEW — one pass over the cycle's work, ralph-review.yaml inlined. It
+  # runs when the build left no open items, at least one shipped item and a
+  # cycle base, and files every finding as an open item.
+  #
+  # `depends_on: [build]` waits on the build block's only sink, its report,
+  # which declares `trigger_rule: all_done` and always completes. A guard
+  # that failed on abort.txt therefore does not stop this block from
+  # starting: its precondition fails on the marker instead, so the block is
+  # skipped and a rejected push is never audited.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: review
+    depends_on: [build]
+    include: ralph-review
+
+  # ═══════════════════════════════════════════════════════════════════════
+  # FIX — the second build, ralph-build.yaml inlined again and namespaced
+  # `fix__<node-id>`, fixes what the review found. Its snapshot finds the
+  # cycle base the first build wrote and keeps it. Its precondition stops it
+  # on abort.txt, so it never builds on a plan the review un-ticked. Nothing
+  # reviews its work; a later run does.
+  # ═══════════════════════════════════════════════════════════════════════
+  - id: fix
+    depends_on: [review]
+    include: ralph-build
+    with: { skip_push: "$INPUTS.skip_push" }
 
   # ═══════════════════════════════════════════════════════════════════════
   # REPORT — the factual lifecycle summary, from outcome.log, abort.txt,
   # run-start.txt and the plan. Read-only, and exits 0 even after an abort:
   # the guard already failed the run, and the summary is the product.
   #
-  # It names every upstream id rather than `cycle` alone: the join rule
+  # It names every upstream id rather than `fix` alone: the join rule
   # relaxes the state a dependency may be in, not the set, so a failed
-  # precondition, seed or plan would otherwise leave `cycle` unreachable and
+  # precondition, seed or plan would otherwise leave `fix` unreachable and
   # the summary unprinted. `auto` is the mode that prints it.
   # ═══════════════════════════════════════════════════════════════════════
   - id: report
-    depends_on: [precondition, seed, plan, cycle]
+    depends_on: [precondition, seed, plan, build, review, fix]
     trigger_rule: all_done
     script: ralph-report
     runtime: bun
