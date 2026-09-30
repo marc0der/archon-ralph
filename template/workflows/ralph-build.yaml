@@ -70,22 +70,26 @@ nodes:
     always_run: true
 
   # ═══════════════════════════════════════════════════════════════════════
-  # BUILD — one plan item per fresh iteration. Guarded on open items, read
-  # from the plan as it stands at the start of this block. The cap stops on
-  # an exhausted plan, two iterations with no repository change, or the
-  # spent budget; the guard fails the run on a marker the cap wrote (a
-  # rejected push). The join rule on the guard is what lets it run after a
-  # loop that was skipped as well as after one that ran.
+  # BUILD — one plan item per fresh iteration. Guarded on ralph-counts'
+  # `run`: open items, read from the plan as it stands at the start of this
+  # block; a false guard writes the skip row. The snapshot records the cycle
+  # base, .ralph/cycle-base, once, so a later review audits every file
+  # changed since the first build. The cap stops on an exhausted plan, two
+  # iterations with no repository change, or the spent budget; the guard
+  # fails the run on a marker the cap wrote (a rejected push). The join rule
+  # on the guard is what lets it run after a loop that was skipped as well
+  # as after one that ran.
   # ═══════════════════════════════════════════════════════════════════════
   - id: counts
     depends_on: [init]
     script: ralph-counts
     runtime: bun
+    with: { mode: build }
     always_run: true
 
   - id: snapshot
     depends_on: [counts]
-    when: "$counts.output.open > 0"
+    when: "$counts.output.run == true"
     script: ralph-snapshot
     runtime: bun
     with: { mode: build }

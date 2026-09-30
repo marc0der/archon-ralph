@@ -38,6 +38,9 @@ const LIFECYCLE = "ralph-wiggum.yaml";
 /** The phase file whose `snapshot` node carries the review guard. */
 const REVIEW = "ralph-review.yaml";
 
+/** The phase file whose `snapshot` node carries the build guard. */
+const BUILD = "ralph-build.yaml";
+
 /** Where a `script:` or a `loop.command` resolves to. Archon omits the suffix. */
 function resolve(dir: string, name: string, suffix: string): string {
   return join(TEMPLATE, dir, name.endsWith(suffix) ? name : `${name}${suffix}`);
@@ -336,6 +339,25 @@ describe("the workflow definitions", () => {
       expect({ file: REVIEW, when: review?.byId.get("snapshot")?.node["when"] }).toEqual({
         file: REVIEW,
         when: "$counts.output.open == 0 && $counts.output.shipped > 0 && $counts.output.cited > 0",
+      });
+    });
+  });
+
+  test("the build guard reads the run verdict of build-mode counts", async () => {
+    await withTempRepo(() => {
+      const build = parsed.find((entry) => entry.file === BUILD);
+      expect(build).toBeDefined();
+
+      // one-shot-review §3.4: `ralph-counts` owns the predicate and writes the
+      // skip row, so the `when:` reads its boolean and nothing else. A guard
+      // on the raw counts could pass where the script already logged a skip.
+      expect({ file: BUILD, when: build?.byId.get("snapshot")?.node["when"] }).toEqual({
+        file: BUILD,
+        when: "$counts.output.run == true",
+      });
+      expect({ file: BUILD, with: build?.byId.get("counts")?.node["with"] }).toEqual({
+        file: BUILD,
+        with: { mode: "build" },
       });
     });
   });
