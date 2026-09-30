@@ -15,7 +15,8 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { main } from "../template/scripts/ralph-precondition.ts";
 import { withTempRepo } from "./helpers.ts";
 
@@ -202,6 +203,65 @@ describe("ralph-precondition modes", () => {
 
       expect(runMain({ ...env, ARGUMENTS: "   \n" }).code).toBe(1);
       expect(runMain({ ...env, ARGUMENTS: "ship the thing" }).code).toBe(0);
+    });
+  });
+});
+
+/**
+ * The abort check (one-shot review spec §3.2). A block's report always
+ * succeeds, so inside `ralph-wiggum` this node is what keeps the `fix` block
+ * from building on a plan a review pass un-ticked.
+ */
+describe("ralph-precondition abort marker", () => {
+  const firstLine = "review: reduced the shipped item count from 3 to 2";
+
+  function writeMarker(artifactsDir: string): void {
+    writeFileSync(join(artifactsDir, "abort.txt"), `${firstLine}\nsecond line\n`);
+  }
+
+  for (const mode of ["build", "review"]) {
+    test(`fails in ${mode} mode and names the marker's first line`, async () => {
+      await withTempRepo(({ artifactsDir }) => {
+        writeMarker(artifactsDir);
+
+        const { code, out, err } = runMain(modeEnv(mode));
+
+        expect(code).toBe(1);
+        expect(out).toContain("FAIL: no earlier block aborted the run");
+        expect(err).toBe(`ralph-precondition: an earlier block aborted the run: ${firstLine}`);
+      });
+    });
+  }
+
+  test("passes in build mode without a marker", async () => {
+    await withTempRepo(() => {
+      const { code, out } = runMain(modeEnv("build"));
+
+      expect(code).toBe(0);
+      expect(out).toContain("ok: no earlier block aborted the run");
+    });
+  });
+
+  // `plan` runs before anything can write the marker, so it never looks.
+  test("passes in plan mode with a marker present", async () => {
+    await withTempRepo(({ artifactsDir }) => {
+      writeMarker(artifactsDir);
+
+      const { code, out } = runMain({ ...modeEnv("plan"), ARGUMENTS: "ship the thing" });
+
+      expect(code).toBe(0);
+      expect(out).not.toContain("aborted");
+    });
+  });
+
+  test("skips the check when ARTIFACTS_DIR is empty", async () => {
+    await withTempRepo(({ root }) => {
+      writeMarker(root);
+
+      const { code, out } = runMain({ ...modeEnv("build"), ARTIFACTS_DIR: "" });
+
+      expect(code).toBe(0);
+      expect(out).not.toContain("aborted");
     });
   });
 });
