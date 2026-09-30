@@ -1,10 +1,9 @@
 /**
- * The anchor set (spec-anchored-review §7). `citedSpecs` decides the fourth
- * review guard term, so a rule that over-matches starts an audit with no
- * specification to measure against, and one that under-matches skips review on
- * a well-anchored plan. These cases pin the token rules of §4 — the `Spec:`
- * field match, and the whole non-space, non-backtick token — their byte order,
- * and the body the rules run over.
+ * The anchor set (spec-anchored-review §7). `citedSpecs` gives the spec count
+ * of `ralph-review-exit`'s exit line, so a rule that over- or under-matches
+ * misreports what the review pass measured the tree against. These cases pin
+ * the token rules of §4 — the `Spec:` field match, and the whole non-space,
+ * non-backtick token — their byte order, and the body the rules run over.
  */
 
 import { describe, expect, test } from "bun:test";
