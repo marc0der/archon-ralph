@@ -1,12 +1,12 @@
 /**
- * `ralph-report`'s three row states and the lines below them (§9).
+ * `ralph-report`'s row states and the lines below them (one-shot review §9).
  *
  * The report is the product of the run: it is the only place an operator sees
  * what each phase did, and it runs after the guard has already failed a broken
  * run, so it must exit 0 in every case — including the cases where there is
  * nothing to report. Every test asserts rendered lines rather than a parse
  * tree, because the alignment and the wording *are* the contract; §4.2 quotes
- * the whole summary verbatim.
+ * the whole summary verbatim, and §5.1 quotes it again.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -31,24 +31,19 @@ const CITATION = "  Spec: `specs/mock.md` §1";
 
 /**
  * A plan with `shipped`, `open` and `superseded` real items, each under a
- * `CITATION` line unless `cited` says otherwise.
+ * `CITATION` line.
  *
  * The `## Entry Format` exemplar is included because it is an open item
  * textually: the `Plan:` row must count through `planItemsBody` like every
  * other count in the lifecycle, and a fixture without the heading would pass
  * either way.
- *
- * `cited: false` is the one plan the third review guard term rejects, and §7
- * names it as the deliberate exception to the seeded citations. It omits the
- * line rather than emptying `CITATION`, so no marker count and no column of any
- * other fixture moves.
  */
-function writePlan(shipped: number, open: number, superseded: number, cited = true): void {
+function writePlan(shipped: number, open: number, superseded: number): void {
   const items = [
     ...Array.from({ length: shipped }, (_, i) => `- [x] **Shipped ${i + 1}**`),
     ...Array.from({ length: open }, (_, i) => `- [ ] **Open ${i + 1}**`),
     ...Array.from({ length: superseded }, (_, i) => `- [~] **Superseded ${i + 1}**`),
-  ].flatMap((item) => (cited ? [item, CITATION] : [item]));
+  ].flatMap((item) => [item, CITATION]);
   writeFileSync(
     "IMPLEMENTATION_PLAN.md",
     ["# Implementation Plan", "", "## Entry Format", "", "- [ ] **Exemplar**", "", "## Items", "", ...items, ""].join(
@@ -83,106 +78,80 @@ function runMain(env: NodeJS.ProcessEnv = process.env): {
   }
 }
 
-/** The state column of a row, by its label. */
-function state(lines: string[], label: string): string | undefined {
-  const row = lines.find((line) => line.trimStart().startsWith(`${label} `));
-  return row?.trimStart().slice(label.length).trimStart();
-}
+const ARTIFACTS =
+  "Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; " +
+  "previous cycle under .ralph/<timestamp>/";
 
 describe("ralph-report", () => {
-  test("renders the summary §4.2 quotes, byte for byte", async () => {
+  test("renders the summary §5.1 quotes, byte for byte", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       // The spec's own example log. The alignment is asserted whole because the
-      // three column widths are the only thing making the block readable, and a
-      // row built with the wrong padding is invisible to a substring assertion.
+      // column widths are the only thing making the rows readable, and a row
+      // built with the wrong padding is invisible to a substring assertion.
       writeLog(artifactsDir, [
-        "seed: archived previous cycle to .ralph/20260917-101500/",
+        "seed: archived previous cycle to .ralph/20260930-101500/",
         "plan: converged on pass 3",
         "build: 9 iterations, plan exhausted",
-        "review: converged on pass 2, audited 9 specs",
-        "cycle 1: 2 open items remain — starting cycle 2",
+        "review: Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
         "build: 3 iterations, plan exhausted",
-        "review: converged on pass 1, audited 11 specs",
-        "cycle 2: clean — no open items remain",
       ]);
       writePlan(11, 0, 1);
 
       expect(report(artifactsDir)).toEqual([
         "Ralph lifecycle summary",
-        "  seed     ran — archived previous cycle to .ralph/20260917-101500/",
-        "  plan     ran — converged on pass 3",
-        "  cycle 1",
-        "    build  ran — 9 iterations, plan exhausted",
-        "    review ran — converged on pass 2, audited 9 specs, filed 2 findings",
-        "  cycle 2",
-        "    build  ran — 3 iterations, plan exhausted",
-        "    review ran — converged on pass 1, audited 11 specs, filed 0 findings",
-        "  Result: clean after 2 cycles",
+        "  1 seed      ran — archived previous cycle to .ralph/20260930-101500/",
+        "  2 plan      ran — converged on pass 3",
+        "  3 build     ran — 9 iterations, plan exhausted",
+        "  4 review    ran — Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
+        "  5 build     ran — 3 iterations, plan exhausted",
         "",
         "Plan: 11 shipped, 0 open, 1 superseded",
-        "Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; " +
-          "previous cycle under .ralph/<timestamp>/",
+        ARTIFACTS,
       ]);
     });
   });
 
-  test("reports a skipped build and reads the review's skip reason off the cycle line", async () => {
+  test("assigns the two build rows to phases 3 and 5 by position", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
-      // Cycle 1: review filed findings, so build ran and review did too. Cycle
-      // 2: the plan still held open items, so `review` was skipped on its
-      // `open == 0` guard. Cycle 3: nothing shipped, so review had no audit.
-      // The plan holds one superseded item so that it still cites a spec: the
-      // shipped cause only renders once the third guard term is satisfied.
+      // Nothing in a row's text says which build wrote it, so the slots are
+      // positional, and a third build row has no slot at all.
       writeLog(artifactsDir, [
-        "build: 4 iterations, budget of 4 spent",
-        "cycle 1: 3 open items remain — starting cycle 2",
-        "build: 2 iterations, no changes for 2 consecutive iterations",
-        "cycle 2: 3 open items remain — starting cycle 3",
-        "cycle 3: clean — no open items remain",
+        "build: first",
+        "build: second",
+        "build: third",
       ]);
-      writePlan(0, 0, 1);
 
       const lines = report(artifactsDir);
-      expect(lines).toContain("    review skipped — 3 open items remain");
-      expect(lines).toContain("    build  skipped — no open items");
-      expect(lines).toContain("    review skipped — no shipped items to audit");
-      // The skipped rows still belong to their own cycles, three of them.
-      expect(lines.filter((line) => line.startsWith("  cycle "))).toEqual([
-        "  cycle 1",
-        "  cycle 2",
-        "  cycle 3",
-      ]);
+      expect(lines).toContain("  3 build     ran — first");
+      expect(lines).toContain("  5 build     ran — second");
+      expect(lines).toContain("  4 review    not reached");
+      expect(lines.some((line) => line.includes("third"))).toBe(false);
     });
   });
 
-  test("tells the two zero-open skip causes apart by the plan's citations", async () => {
+  test("prints a gate's skip row as skipped, not as a run", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
-      // One log, two plans. `cycle 1: clean` says nothing about which of the
-      // review guard's other two terms was false, so the cause is derived from
-      // the plan as it stands (§4) — and the operator's next command differs:
-      // `ralph-plan` to anchor the items, `ralph-build` to ship one.
       writeLog(artifactsDir, [
-        "build: 2 iterations, plan exhausted",
-        "cycle 1: clean — no open items remain",
+        "seed: nothing to archive",
+        "plan: converged on pass 1",
+        "build: 4 iterations, budget of 4 spent",
+        "review: skipped — 3 open items remain",
+        "build: 4 iterations, budget of 4 spent",
       ]);
+      writePlan(2, 3, 0);
 
-      writePlan(2, 0, 0, false);
-      expect(report(artifactsDir)).toContain(
-        "    review skipped — no cited specs — run ralph-plan to anchor the items on them",
-      );
-
-      // The same two shipped items, now citing a spec: the third term holds,
-      // so the shipped cause is the only one left to name.
-      writePlan(2, 0, 0);
-      expect(report(artifactsDir)).toContain("    review skipped — no shipped items to audit");
+      const lines = report(artifactsDir);
+      expect(lines).toContain("  4 review    skipped — 3 open items remain");
+      expect(lines).toContain("  5 build     ran — 4 iterations, budget of 4 spent");
     });
   });
 
-  test("reports a rejected push as a failed build row and a failed result", async () => {
+  test("reports a rejected push as failed, with not reached after it", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       // `ralph-build-cap` writes git's output into both files, so the log holds
       // lines that are evidence rather than rows; they must not become rows.
       writeLog(artifactsDir, [
+        "seed: nothing to archive",
         "plan: converged on pass 2",
         "build: push rejected",
         " ! [rejected]        main -> main (non-fast-forward)",
@@ -193,12 +162,17 @@ describe("ralph-report", () => {
       );
       writePlan(2, 1, 0);
 
-      const lines = report(artifactsDir);
-      expect(state(lines, "build")).toBe("failed — build: push rejected");
-      expect(lines).toContain("  Result: failed after 1 cycle");
-      // The cycle never closed, so its review row has no count to quote.
-      expect(state(lines, "review")).toBe("skipped — open items remain");
-      expect(lines.some((line) => line.includes("non-fast-forward"))).toBe(false);
+      expect(report(artifactsDir)).toEqual([
+        "Ralph lifecycle summary",
+        "  1 seed      ran — nothing to archive",
+        "  2 plan      ran — converged on pass 2",
+        "  3 build     failed — build: push rejected",
+        "  4 review    not reached",
+        "  5 build     not reached",
+        "",
+        "Plan: 2 shipped, 1 open, 0 superseded",
+        ARTIFACTS,
+      ]);
     });
   });
 
@@ -212,30 +186,10 @@ describe("ralph-report", () => {
       writePlan(8, 0, 0);
 
       const lines = report(artifactsDir);
-      expect(state(lines, "review")).toBe(`failed — ${abort}`);
-      // The build of the same cycle still ran, and still says so.
-      expect(state(lines, "build")).toBe("ran — 9 iterations, plan exhausted");
-      expect(lines).toContain("  Result: failed after 1 cycle");
-    });
-  });
-
-  test("reports the cycle cap without inventing a finding count", async () => {
-    await withTempRepo(async ({ artifactsDir }) => {
-      // The cap line names open items and counts none (§4.2), so neither the
-      // `filed F findings` clause nor a counted skip reason can be derived.
-      writeLog(artifactsDir, [
-        "build: 6 iterations, budget of 6 spent",
-        "cycle 1: 4 open items remain — starting cycle 2",
-        "build: 5 iterations, budget of 6 spent",
-        "cycle 2: reached the cycle cap of 2 with open items remaining",
-      ]);
-      writePlan(7, 4, 0);
-
-      const lines = report(artifactsDir);
-      expect(state(lines, "review")).toBe("skipped — 4 open items remain");
-      expect(lines).toContain("    review skipped — open items remain");
-      expect(lines).toContain("  Result: stopped at the cycle cap after 2 cycles");
-      expect(lines).toContain("Plan: 7 shipped, 4 open, 0 superseded");
+      expect(lines).toContain(`  4 review    failed — ${abort}`);
+      // The build before it still ran, and still says so.
+      expect(lines).toContain("  3 build     ran — 9 iterations, plan exhausted");
+      expect(lines).toContain("  5 build     not reached");
     });
   });
 
@@ -245,13 +199,14 @@ describe("ralph-report", () => {
       // plan. `report` is `always_run`, so this is the row it has to render.
       expect(report(artifactsDir)).toEqual([
         "Ralph lifecycle summary",
-        "  seed     not reached",
-        "  plan     not reached",
-        "  Result: not reached",
+        "  1 seed      not reached",
+        "  2 plan      not reached",
+        "  3 build     not reached",
+        "  4 review    not reached",
+        "  5 build     not reached",
         "",
         "Plan: no IMPLEMENTATION_PLAN.md in the tree",
-        "Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; " +
-          "previous cycle under .ralph/<timestamp>/",
+        ARTIFACTS,
       ]);
     });
   });
@@ -265,36 +220,26 @@ describe("ralph-report", () => {
       expect(ran.code).toBe(0);
       expect(ran.stderr).toEqual([]);
       expect(ran.stdout).toEqual(report(artifactsDir));
-      expect(ran.stdout).toContain("  seed     ran — nothing to archive");
-      expect(ran.stdout).toContain("  plan     ran — reached the cap of 6 passes");
-      // No cycle line and no phase line after `plan`, so no cycle block at all.
-      expect(ran.stdout.some((line) => line.startsWith("  cycle "))).toBe(false);
+      expect(ran.stdout).toContain("  1 seed      ran — nothing to archive");
+      expect(ran.stdout).toContain("  2 plan      ran — reached the cap of 6 passes");
+      expect(ran.stdout).toContain("  3 build     not reached");
 
       delete process.env.ARTIFACTS_DIR;
       const blind = runMain();
       expect(blind.code).toBe(0);
       expect(blind.stderr).toEqual(["ralph-report: ARTIFACTS_DIR is not set"]);
-      expect(blind.stdout).toContain("  seed     not reached");
+      expect(blind.stdout).toContain("  1 seed      not reached");
       // The plan is still on disk and still counted: only the log was unreachable.
       expect(blind.stdout).toContain("Plan: 0 shipped, 5 open, 0 superseded");
     });
   });
 
-  test("opens no empty cycle block after the last cycle line", async () => {
-    // The healthy log ends on a `cycle N:` line, and the block it opens holds
-    // nothing. Emitting it would add a phantom cycle to every clean run.
-    const closed = parseOutcome("build: 1 iterations, plan exhausted\ncycle 1: clean — no open items remain\n");
-    expect(closed.cycles).toHaveLength(1);
-    expect(closed.cycles[0]?.end).toBe("cycle 1: clean — no open items remain");
-
-    // A cycle cut off mid-way has no closing line, and its block is still real.
-    const open = parseOutcome("build: 2 iterations, plan exhausted\n");
-    expect(open.cycles).toHaveLength(1);
-    expect(open.cycles[0]).toEqual({
-      build: "build: 2 iterations, plan exhausted",
-      review: null,
-      end: null,
-    });
+  test("parses one row per phase slot and drops lines with no phase prefix", () => {
+    expect(
+      parseOutcome(
+        "seed: nothing to archive\nplan: converged on pass 1\nbuild: push rejected\ngit said no\n",
+      ),
+    ).toEqual(["seed: nothing to archive", "plan: converged on pass 1", "build: push rejected", null, null]);
   });
 });
 
@@ -303,9 +248,9 @@ describe("ralph-report", () => {
  *
  * A block report is the interim line a phase workflow prints, so it is asserted
  * whole rather than by substring: the thing that distinguishes it from the
- * summary is everything it leaves out — no `Ralph lifecycle summary` header, no
- * cycle block, no `Result:` row — and a `toContain` assertion cannot see an
- * absence. Every mode is passed as a literal at its call site rather than
+ * summary is everything it leaves out — no `Ralph lifecycle summary` header,
+ * no phase number, no other phase's row — and a `toContain` assertion cannot
+ * see an absence. Every mode is passed as a literal at its call site rather than
  * through a helper, because the mode is the one thing each test is about.
  */
 describe("ralph-report modes", () => {
@@ -365,7 +310,7 @@ describe("ralph-report modes", () => {
 
   // The same log, the same plan, the whole summary: `auto` is `ralph-wiggum`'s
   // mode and adding the three block modes must not have moved one line of it.
-  test("still prints the summary §4.2 quotes in auto mode", async () => {
+  test("still prints the summary §5.1 quotes in auto mode", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       writeLog(artifactsDir, MID_CYCLE);
       writePlan(7, 2, 1);
@@ -375,16 +320,14 @@ describe("ralph-report modes", () => {
       expect(ran.code).toBe(0);
       expect(ran.stdout).toEqual([
         "Ralph lifecycle summary",
-        "  seed     ran — archived previous cycle to .ralph/20260917-101500/",
-        "  plan     ran — converged on pass 3",
-        "  cycle 1",
-        "    build  ran — 9 iterations, plan exhausted",
-        "    review ran — converged on pass 2, audited 9 specs",
-        "  Result: stopped with open items after 1 cycle",
+        "  1 seed      ran — archived previous cycle to .ralph/20260917-101500/",
+        "  2 plan      ran — converged on pass 3",
+        "  3 build     ran — 9 iterations, plan exhausted",
+        "  4 review    ran — converged on pass 2, audited 9 specs",
+        "  5 build     not reached",
         "",
         PLAN_ROW,
-        "Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; " +
-          "previous cycle under .ralph/<timestamp>/",
+        ARTIFACTS,
       ]);
     });
   });
@@ -439,7 +382,7 @@ describe("ralph-report modes", () => {
   test("prints not reached for a block that wrote no row", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       writeLog(artifactsDir, ["seed: nothing to archive"]);
-      writePlan(2, 0, 0, false);
+      writePlan(2, 0, 0);
 
       for (const [mode, row] of <const>[
         ["plan", "  plan     not reached"],
