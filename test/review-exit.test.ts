@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { main } from "../template/scripts/ralph-review-exit.ts";
 import { writeCounter, writeCycleBase } from "../template/scripts/lib/ralph.ts";
@@ -99,6 +99,18 @@ describe("ralph-review-exit", () => {
       expect(runMain({ ARTIFACTS_DIR: artifactsDir }).code).toBe(0);
 
       expect(existsSync(join(artifactsDir, "abort.txt"))).toBe(false);
+    });
+  });
+
+  test("throws on a missing plan and writes nothing", async () => {
+    await withTempRepo(({ artifactsDir }) => {
+      writePlan(["- [x] **One**"]);
+      unlinkSync("IMPLEMENTATION_PLAN.md");
+
+      expect(() => main({ ARTIFACTS_DIR: artifactsDir })).toThrow();
+
+      expect(existsSync(join(artifactsDir, "abort.txt"))).toBe(false);
+      expect(outcome(artifactsDir)).toEqual([]);
     });
   });
 
