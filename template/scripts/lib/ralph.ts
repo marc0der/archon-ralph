@@ -299,20 +299,17 @@ export function cycleChangedFiles(): string[] {
 /** `settings.json`: the workflow inputs, as `ralph-seed` records them (§4.2). */
 export interface Settings {
   skip_push: boolean;
-  cycle_cap: number;
 }
 
-const SETTINGS_DEFAULTS: Settings = { skip_push: false, cycle_cap: 3 };
+const SETTINGS_DEFAULTS: Settings = { skip_push: false };
 
 /**
  * The workflow inputs, read back from `<artifactsDir>/settings.json`.
  *
  * `until_bash` scripts run in Archon's loop executor and never see `INPUTS_*`
- * (§4.2 step 5), so this file is the only way `skip_push` and `cycle_cap` reach
- * `ralph-build-cap` and `ralph-cycle-cap`. Each field falls back on its own: a
- * settings file that survived a partial write must still yield a usable cap
- * rather than `NaN`, which would make `cycles >= cycle_cap` false forever and
- * run the fixpoint to `max_iterations`.
+ * (§4.2 step 5), so this file is the only way `skip_push` reaches
+ * `ralph-build-cap`. A field that is missing or of the wrong type falls back to
+ * its default, so a settings file that survived a partial write still reads.
  */
 export function readSettings(artifactsDir: string): Settings {
   try {
@@ -320,10 +317,6 @@ export function readSettings(artifactsDir: string): Settings {
     return {
       skip_push:
         typeof parsed.skip_push === "boolean" ? parsed.skip_push : SETTINGS_DEFAULTS.skip_push,
-      cycle_cap:
-        Number.isInteger(parsed.cycle_cap) && parsed.cycle_cap >= 1
-          ? parsed.cycle_cap
-          : SETTINGS_DEFAULTS.cycle_cap,
     };
   } catch {
     // Missing file, unreadable file, or not JSON at all: ralph's `|| echo`.

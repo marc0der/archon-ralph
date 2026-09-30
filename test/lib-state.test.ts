@@ -1,8 +1,7 @@
 /**
  * The run-state helpers (spec §9). These four are how one iteration tells the
  * next one where it got to: a counter that reads back wrong repeats or skips a
- * phase, and a `cycle_cap` that reads back `NaN` runs the fixpoint to
- * `max_iterations`. So every case below is a file the loop must survive.
+ * phase. So every case below is a file the loop must survive.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -16,7 +15,7 @@ import {
 } from "../template/scripts/lib/ralph.ts";
 import { withTempRepo } from "./helpers.ts";
 
-const DEFAULTS = { skip_push: false, cycle_cap: 3 };
+const DEFAULTS = { skip_push: false };
 
 describe("readSettings", () => {
   test("defaults when settings.json is missing", async () => {
@@ -31,14 +30,11 @@ describe("readSettings", () => {
     });
   });
 
-  test("reads both fields back", async () => {
+  test("reads skip_push back", async () => {
     await withTempRepo(({ artifactsDir }) => {
-      writeFileSync(
-        join(artifactsDir, "settings.json"),
-        JSON.stringify({ skip_push: true, cycle_cap: 2 }),
-      );
+      writeFileSync(join(artifactsDir, "settings.json"), JSON.stringify({ skip_push: true }));
 
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 2 });
+      expect(readSettings(artifactsDir)).toEqual({ skip_push: true });
     });
   });
 
@@ -50,23 +46,13 @@ describe("readSettings", () => {
     });
   });
 
-  // A partial write must not take the whole file down with it: the cap scripts
-  // have no other source for the field that did survive.
-  test("defaults each field on its own", async () => {
-    await withTempRepo(({ artifactsDir }) => {
-      writeFileSync(join(artifactsDir, "settings.json"), JSON.stringify({ skip_push: true }));
-
-      expect(readSettings(artifactsDir)).toEqual({ skip_push: true, cycle_cap: 3 });
-    });
-  });
-
-  test("rejects a cycle_cap that is not a positive integer", async () => {
+  test("defaults a skip_push that is not a boolean", async () => {
     await withTempRepo(({ artifactsDir }) => {
       const file = join(artifactsDir, "settings.json");
 
-      for (const cycle_cap of ["2", 0, 1.5, null]) {
-        writeFileSync(file, JSON.stringify({ cycle_cap }));
-        expect(readSettings(artifactsDir).cycle_cap).toBe(3);
+      for (const skip_push of ["true", 1, null]) {
+        writeFileSync(file, JSON.stringify({ skip_push }));
+        expect(readSettings(artifactsDir)).toEqual(DEFAULTS);
       }
     });
   });
@@ -105,7 +91,7 @@ describe("readCounter and writeCounter", () => {
 
   test("tolerates surrounding whitespace", async () => {
     await withTempRepo(({ artifactsDir }) => {
-      const file = join(artifactsDir, "cycle-iter.txt");
+      const file = join(artifactsDir, "build-iter.txt");
       writeFileSync(file, " 7 \n");
 
       expect(readCounter(file, 0)).toBe(7);

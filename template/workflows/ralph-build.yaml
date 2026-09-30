@@ -60,7 +60,7 @@ nodes:
   # once. It archives nothing, so the plan this block is about to build
   # survives. skip_push is merged into settings.json, which is where
   # ralph-build-cap reads it; composed, the expander substitutes
-  # `ralph-wiggum`'s value here and the cycle_cap already in the file stays.
+  # `ralph-wiggum`'s value here.
   # ═══════════════════════════════════════════════════════════════════════
   - id: init
     depends_on: [precondition]
