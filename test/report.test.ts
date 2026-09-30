@@ -309,14 +309,7 @@ describe("ralph-report", () => {
  * through a helper, because the mode is the one thing each test is about.
  */
 describe("ralph-report modes", () => {
-  /**
-   * The log a block report reads: the rows of the cycle `ralph-cycle-cap` has
-   * not closed yet.
-   *
-   * No `cycle N:` line, because a block reports from inside its own cycle. A
-   * closed trailing block reads as no block at all, which is the case the
-   * skipped-row tests below cover.
-   */
+  /** The log a block report reads: one row per phase that ran. */
   const MID_CYCLE = [
     "seed: archived previous cycle to .ralph/20260917-101500/",
     "plan: converged on pass 3",
@@ -362,8 +355,6 @@ describe("ralph-report modes", () => {
       const ran = runMain({ ...process.env, INPUTS_MODE: "review" });
 
       expect(ran.code).toBe(0);
-      // No `, filed F findings` clause: the count is read off the `cycle N:`
-      // line, which is appended after the review block has already reported.
       expect(ran.stdout).toEqual([
         "  review   ran — converged on pass 2, audited 9 specs",
         "",
@@ -398,65 +389,76 @@ describe("ralph-report modes", () => {
     });
   });
 
-  // A standalone block whose `when:` guard was false: the loop was skipped, and
-  // `report` runs anyway under `trigger_rule: all_done` (§12.3). The log holds
-  // the rows of the phases that did run and no row for this one.
-  test("reports a skipped block from a log with no phase row", async () => {
+  // A gate that skipped its block appended the skip row, so the block report
+  // prints that row as it stands rather than as a run (one-shot review §5.2).
+  test("prints each block's own skip row", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
-      writeLog(artifactsDir, ["seed: nothing to archive", "plan: converged on pass 1"]);
-      writePlan(0, 3, 0);
+      writeLog(artifactsDir, [
+        "seed: nothing to archive",
+        "plan: skipped — no specs",
+        "build: skipped — no open items",
+        "review: skipped — no cycle base",
+      ]);
+      writePlan(2, 0, 0);
+
+      const planned = runMain({ ...process.env, INPUTS_MODE: "plan" });
+      const built = runMain({ ...process.env, INPUTS_MODE: "build" });
+      const reviewed = runMain({ ...process.env, INPUTS_MODE: "review" });
+
+      const PLAN = "Plan: 2 shipped, 0 open, 0 superseded";
+      expect(planned.stdout).toEqual(["  plan     skipped — no specs", "", PLAN]);
+      expect(built.stdout).toEqual(["  build    skipped — no open items", "", PLAN]);
+      expect(reviewed.stdout).toEqual(["  review   skipped — no cycle base", "", PLAN]);
+    });
+  });
+
+  // The second build of a composed run reads its own row, the last one.
+  test("prints the last row of its phase", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, [
+        ...MID_CYCLE,
+        "review: Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
+        "build: 3 iterations, plan exhausted",
+      ]);
+      writePlan(7, 2, 1);
 
       const built = runMain({ ...process.env, INPUTS_MODE: "build" });
       const reviewed = runMain({ ...process.env, INPUTS_MODE: "review" });
 
-      expect(built.code).toBe(0);
-      expect(built.stdout).toEqual([
-        "  build    skipped — no open items",
-        "",
-        "Plan: 0 shipped, 3 open, 0 superseded",
-      ]);
-      expect(reviewed.code).toBe(0);
+      expect(built.stdout).toEqual(["  build    ran — 3 iterations, plan exhausted", "", PLAN_ROW]);
       expect(reviewed.stdout).toEqual([
-        "  review   skipped — no shipped items to audit",
+        "  review   ran — Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
         "",
-        "Plan: 0 shipped, 3 open, 0 superseded",
+        PLAN_ROW,
       ]);
     });
   });
 
-  // `reviewReport` takes the same cause off the same plan read as the summary
-  // (§4). Its other two guard terms stay indistinguishable here, so the third
-  // is the only one the block report can name.
-  test("names the uncited cause for an absent review row", async () => {
+  // A block that wrote no row failed before its gate: its report says so, and
+  // no plan state can talk it into a skip reason.
+  test("prints not reached for a block that wrote no row", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
-      writeLog(artifactsDir, ["seed: nothing to archive", "plan: converged on pass 1"]);
-
+      writeLog(artifactsDir, ["seed: nothing to archive"]);
       writePlan(2, 0, 0, false);
-      const uncited = runMain({ ...process.env, INPUTS_MODE: "review" });
 
-      expect(uncited.code).toBe(0);
-      expect(uncited.stdout).toEqual([
-        "  review   skipped — no cited specs — run ralph-plan to anchor the items on them",
-        "",
-        "Plan: 2 shipped, 0 open, 0 superseded",
-      ]);
+      for (const [mode, row] of <const>[
+        ["plan", "  plan     not reached"],
+        ["build", "  build    not reached"],
+        ["review", "  review   not reached"],
+      ]) {
+        const ran = runMain({ ...process.env, INPUTS_MODE: mode });
 
-      writePlan(2, 0, 0);
-      const cited = runMain({ ...process.env, INPUTS_MODE: "review" });
-
-      expect(cited.code).toBe(0);
-      expect(cited.stdout).toEqual([
-        "  review   skipped — no shipped items to audit",
-        "",
-        "Plan: 2 shipped, 0 open, 0 superseded",
-      ]);
+        expect(ran.code).toBe(0);
+        expect(ran.stdout).toEqual([
+          row,
+          "",
+          "Plan: 2 shipped, 0 open, 0 superseded",
+        ]);
+      }
     });
   });
 
-  // No plan at all: `counts` throws, the predicate is false, and the row names
-  // the shipped cause. Claiming the gate fired would name a cause the run never
-  // reached — the `Plan:` row below already says the artifact is missing.
-  test("falls back to the shipped cause when no plan file exists", async () => {
+  test("prints not reached when no plan file exists", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       writeLog(artifactsDir, ["seed: nothing to archive"]);
 
@@ -464,10 +466,23 @@ describe("ralph-report modes", () => {
 
       expect(ran.code).toBe(0);
       expect(ran.stdout).toEqual([
-        "  review   skipped — no shipped items to audit",
+        "  review   not reached",
         "",
         "Plan: no IMPLEMENTATION_PLAN.md in the tree",
       ]);
+    });
+  });
+
+  // The abort row keeps its `failed` state in a block report.
+  test("prints failed for the row that carries the abort marker", async () => {
+    await withTempRepo(async ({ artifactsDir }) => {
+      writeLog(artifactsDir, [...MID_CYCLE.slice(0, 2), "build: push rejected"]);
+      writeFileSync(join(artifactsDir, "abort.txt"), "build: push rejected\ngit said no\n");
+      writePlan(7, 2, 1);
+
+      const ran = runMain({ ...process.env, INPUTS_MODE: "build" });
+
+      expect(ran.stdout).toEqual(["  build    failed — build: push rejected", "", PLAN_ROW]);
     });
   });
 
