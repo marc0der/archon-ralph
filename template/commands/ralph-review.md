@@ -1,6 +1,6 @@
 ---
 description: Ralph Wiggum review pass — review the cycle's work in one pass and file findings as new plan items.
-source: marc0der/ralph@f6d2405 prompts/review.md
+source: marc0der/ralph@a0ac4fd prompts/review.md
 ---
 
 # Review Agent
