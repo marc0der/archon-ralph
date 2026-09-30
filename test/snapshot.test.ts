@@ -3,7 +3,7 @@
  *
  * This node writes the only state a cap script has to compare against, so a
  * file it fails to write does not fail the run — it makes the loop that follows
- * compare against a stale file, or against the previous cycle's counters, and
+ * compare against a stale file, or against the previous block's counters, and
  * exit on its first iteration. Every test here asserts both what was written
  * and what was left alone.
  */
@@ -12,7 +12,13 @@ import { describe, expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isMode, main, snapshot } from "../template/scripts/ralph-snapshot.ts";
-import { planStateHash, readCounter, repoState, writeCounter } from "../template/scripts/lib/ralph.ts";
+import {
+  CYCLE_BASE,
+  planStateHash,
+  readCounter,
+  repoState,
+  writeCounter,
+} from "../template/scripts/lib/ralph.ts";
 import { withTempRepo } from "./helpers.ts";
 
 const REAL_TEMPLATE = join(import.meta.dir, "../template/ralph/templates/IMPLEMENTATION_PLAN.md");
@@ -69,6 +75,19 @@ function runMain(env: NodeJS.ProcessEnv): number {
     console.log = log;
     console.error = error;
   }
+}
+
+/** `main()` with its stdout lines returned rather than printed. */
+function mainLines(env: NodeJS.ProcessEnv): string[] {
+  const { log } = console;
+  const lines: string[] = [];
+  console.log = (line: string) => lines.push(line);
+  try {
+    expect(main(env)).toBe(0);
+  } finally {
+    console.log = log;
+  }
+  return lines;
 }
 
 function modeEnv(mode: string): NodeJS.ProcessEnv {
@@ -136,20 +155,27 @@ describe("ralph-snapshot plan mode", () => {
 });
 
 describe("ralph-snapshot review mode", () => {
-  test("writes plan-hash.txt, shipped-before.txt and a zeroed review-iter.txt", async () => {
+  test("writes shipped-before.txt and nothing else", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       writePlan([...shipped(4), ...open(0)]);
 
-      expect(snapshot(artifactsDir, "review")).toEqual([
-        "plan-hash.txt",
-        "shipped-before.txt",
-        "review-iter.txt",
-      ]);
-      expect(readFileSync(join(artifactsDir, "plan-hash.txt"), "utf8")).toBe(`${planStateHash()}\n`);
+      expect(snapshot(artifactsDir, "review")).toEqual(["shipped-before.txt"]);
       expect(counter(artifactsDir, "shipped-before.txt")).toBe(4);
-      expect(counter(artifactsDir, "review-iter.txt")).toBe(0);
-      // The review loop compares repository state nowhere: it never commits.
-      expect(existsSync(join(artifactsDir, "repo-state.txt"))).toBe(false);
+      for (const name of ["plan-hash.txt", "review-iter.txt", "repo-state.txt"]) {
+        expect(existsSync(join(artifactsDir, name))).toBe(false);
+      }
+    });
+  });
+
+  test("writes no cycle base", async () => {
+    await withTempRepo(async () => {
+      writePlan(shipped(1));
+
+      expect(mainLines(modeEnv("review"))).toEqual(["review: wrote shipped-before.txt"]);
+
+      // The review reads the base the build wrote; writing one here would make
+      // a review with no build behind it audit an empty cycle.
+      expect(existsSync(CYCLE_BASE)).toBe(false);
     });
   });
 
@@ -196,13 +222,13 @@ describe("ralph-snapshot build mode", () => {
     });
   });
 
-  test("recomputes the budget from the open count of this cycle", async () => {
+  test("recomputes the budget from the open count of this block", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       writePlan([...shipped(9), ...open(10)]);
       expect(runMain(modeEnv("build"))).toBe(0);
       expect(counter(artifactsDir, "build-budget.txt")).toBe(12);
 
-      // Cycle 2 plans against the review's findings, so its budget is its own.
+      // The second build works the review's findings, so its budget is its own.
       writePlan([...shipped(19), ...open(1)]);
       expect(runMain(modeEnv("build"))).toBe(0);
 
@@ -221,7 +247,7 @@ describe("ralph-snapshot build mode", () => {
     });
   });
 
-  test("resets the iteration and noop counters from the previous cycle", async () => {
+  test("resets the iteration and noop counters from the previous block", async () => {
     await withTempRepo(async ({ artifactsDir }) => {
       writePlan(open(4));
       writeCounter(join(artifactsDir, "build-iter.txt"), 11);
@@ -229,10 +255,37 @@ describe("ralph-snapshot build mode", () => {
 
       expect(runMain(modeEnv("build"))).toBe(0);
 
-      // A carried-over noop count of 2 is the worst case: the next cycle's
-      // build would complete after one iteration, whatever it shipped.
+      // A carried-over noop count of 2 is the worst case: the next build would
+      // complete after one iteration, whatever it shipped.
       expect(counter(artifactsDir, "build-iter.txt")).toBe(0);
       expect(counter(artifactsDir, "build-noops.txt")).toBe(0);
+    });
+  });
+});
+
+describe("ralph-snapshot build mode cycle base", () => {
+  test("writes .ralph/cycle-base once across two calls", async () => {
+    await withTempRepo(async () => {
+      writePlan(open(2));
+
+      const first = mainLines(modeEnv("build"));
+      writeFileSync(CYCLE_BASE, "hand-edited base\n");
+      const second = mainLines(modeEnv("build"));
+
+      expect(first[0]).toBe("build: wrote cycle-base");
+      expect([...first, ...second].filter((line) => line === "build: wrote cycle-base")).toHaveLength(1);
+      // The second build of a cycle keeps the first build's base.
+      expect(readFileSync(CYCLE_BASE, "utf8")).toBe("hand-edited base\n");
+    });
+  });
+
+  test("records repoState() as the base", async () => {
+    await withTempRepo(async () => {
+      writePlan(open(1));
+
+      mainLines(modeEnv("build"));
+
+      expect(readFileSync(CYCLE_BASE, "utf8")).toBe(repoState());
     });
   });
 });
@@ -250,6 +303,7 @@ describe("ralph-snapshot failures", () => {
       for (const name of ["plan-hash.txt", "repo-state.txt", "build-budget.txt"]) {
         expect(existsSync(join(artifactsDir, name))).toBe(false);
       }
+      expect(existsSync(CYCLE_BASE)).toBe(false);
     });
   });
 
