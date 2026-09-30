@@ -65,10 +65,9 @@ export function countItems(body: string, marker: ItemMarker): number {
  * non-space, non-backtick token, which keeps a nested repository's
  * `source/svc/specs/x.md` distinct from the root's `specs/x.md`.
  *
- * The three citation forms that name no specification — `AGENTS.md
- * verification gate`, a `Major` finding's `IMPLEMENTATION_PLAN.md` and a
- * `Minor` finding's rule file — are excluded by that token rule alone, with no
- * special case. No marker is filtered, a `[~]` item's citation included, as
+ * The three citation forms that name no specification — `review catalogue`,
+ * a rule file and the `AGENTS.md verification gate` — are excluded by that
+ * token rule alone, with no special case. No marker is filtered, a `[~]` item's citation included, as
  * ralph filters none.
  */
 export function citedSpecs(body: string): string[] {
@@ -133,11 +132,11 @@ function specFiles(dir: string, out: string[]): void {
 }
 
 /**
- * Fingerprint the artifacts a plan or review iteration is allowed to change:
+ * Fingerprint the artifacts a plan iteration is allowed to change:
  * md5 over `IMPLEMENTATION_PLAN.md`, then every regular file under `specs/`,
  * path before contents. Mirrors ralph's `plan_state_hash`.
  *
- * Those phases never commit — the plan is gitignored — so `HEAD` cannot detect
+ * That phase never commits — the plan is gitignored — so `HEAD` cannot detect
  * their progress. A pass that leaves this hash unchanged has converged. Names
  * are hashed as well as contents so that adding or removing a spec counts as a
  * change; an unreadable spec contributes its path alone rather than aborting.
@@ -354,7 +353,7 @@ export function writeCounter(file: string, n: number): void {
  *
  * Every phase writes its row here and `ralph-report` reads its rows from this
  * file alone (§4.2): `ralph-snapshot` zeroes the counters at the start of each
- * cycle, so a figure that is not in this log is gone by report time.
+ * block, so a figure that is not in this log is gone by report time.
  */
 export function appendOutcome(artifactsDir: string, line: string): void {
   appendFileSync(join(artifactsDir, "outcome.log"), `${line}\n`);

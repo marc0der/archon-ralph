@@ -178,7 +178,7 @@ export function mergeSettings(artifactsDir: string, env = process.env): void {
  * happen to carry is in the baseline rather than reported as having appeared.
  *
  * In `init` mode both writes defer to what is already there. The baseline is
- * recorded only when absent, because a block's `init` can run cycles after
+ * recorded only when absent, because a block's `init` can run blocks after
  * `seed` recorded the real start of the run, and re-recording it would hide
  * every repository that moved in between. The `outcome.log` row is `seed`'s
  * alone: an `init` row per block would put several of them in a log the report

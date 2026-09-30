@@ -35,7 +35,7 @@ import {
   writeCycleBase,
 } from "./lib/ralph.ts";
 
-/** The three phases that have a loop to snapshot. */
+/** The three phases that take a snapshot. */
 const MODES = ["plan", "build", "review"] as const;
 
 export type Mode = (typeof MODES)[number];
