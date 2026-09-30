@@ -111,16 +111,16 @@ describe("appendOutcome", () => {
     });
   });
 
-  // The report splits this file into cycles on its `cycle N:` lines, so an
-  // append that clobbered the earlier rows would lose every previous cycle.
+  // The report reads one row per phase from this file, so an append that
+  // clobbered the earlier rows would lose every earlier phase.
   test("keeps the rows of an existing log", async () => {
     await withTempRepo(({ artifactsDir }) => {
       writeFileSync(join(artifactsDir, "outcome.log"), "seed: nothing to archive\n");
-      appendOutcome(artifactsDir, "cycle 1: clean — no open items remain");
+      appendOutcome(artifactsDir, "plan: converged on pass 2");
 
       expect(readFileSync(join(artifactsDir, "outcome.log"), "utf8").split("\n")).toEqual([
         "seed: nothing to archive",
-        "cycle 1: clean — no open items remain",
+        "plan: converged on pass 2",
         "",
       ]);
     });
