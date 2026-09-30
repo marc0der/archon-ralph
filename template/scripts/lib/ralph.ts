@@ -7,8 +7,16 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 
 /** Ralph's three plan-item markers, as they appear at column zero. */
 export type ItemMarker = "[ ]" | "[x]" | "[~]";
@@ -214,6 +222,26 @@ export function repoState(): string {
     .sort(byteOrder)
     .map((line) => `${line}\n`)
     .join("");
+}
+
+/**
+ * The `repoState()` listing just before the cycle's first build, relative to
+ * the checkout root rather than `ARTIFACTS_DIR`: a standalone `ralph-build`
+ * and a later standalone `ralph-review` are two runs with two artifacts
+ * directories, and review still needs the base the build recorded.
+ */
+export const CYCLE_BASE = ".ralph/cycle-base";
+
+/**
+ * Record the cycle base unless one exists, and return whether it wrote. A
+ * second build in the same cycle keeps the first build's base. Mirrors
+ * ralph's `write_cycle_base`.
+ */
+export function writeCycleBase(): boolean {
+  if (existsSync(CYCLE_BASE)) return false;
+  mkdirSync(dirname(CYCLE_BASE), { recursive: true });
+  writeFileSync(CYCLE_BASE, repoState());
+  return true;
 }
 
 /* ── Run state: the files the cap scripts carry between iterations ────────── */
