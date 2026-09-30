@@ -276,7 +276,7 @@ describe("ralph-report modes", () => {
     "seed: archived previous cycle to .ralph/20260917-101500/",
     "plan: converged on pass 3",
     "build: 9 iterations, plan exhausted",
-    "review: converged on pass 2, audited 9 specs",
+    "review: Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
   ];
 
   /** The `Plan:` row every block report ends on, from `writePlan(7, 2, 1)`. */
@@ -318,7 +318,7 @@ describe("ralph-report modes", () => {
 
       expect(ran.code).toBe(0);
       expect(ran.stdout).toEqual([
-        "  review   ran — converged on pass 2, audited 9 specs",
+        "  review   ran — Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
         "",
         PLAN_ROW,
       ]);
@@ -340,7 +340,7 @@ describe("ralph-report modes", () => {
         "  1 seed      ran — archived previous cycle to .ralph/20260917-101500/",
         "  2 plan      ran — converged on pass 3",
         "  3 build     ran — 9 iterations, plan exhausted",
-        "  4 review    ran — converged on pass 2, audited 9 specs",
+        "  4 review    ran — Review filed 2 findings. Reviewed 1 specs and 14 changed files.",
         "  5 build     not reached",
         "",
         PLAN_ROW,

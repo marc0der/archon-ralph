@@ -4,16 +4,15 @@
  *
  * These three files are the run's only memory. `settings.json` is the sole
  * route the workflow inputs have to the `until_bash` cap scripts, which see no
- * `INPUTS_*` (§4.2 step 5), so a wrong default here silently changes when the
- * fixpoint stops. `outcome.log` is the sole source of the report's rows (§4.2),
- * so a seed that writes no row makes the whole summary start at `plan`.
+ * `INPUTS_*` (§4.2 step 5). `outcome.log` is the sole source of the report's
+ * rows (§4.2), so a seed that writes no row makes the whole summary start at
+ * `plan`.
  *
  * `INPUTS_MODE=init` defers to all three instead of writing them (§12.4). The
  * last describe pins that deference, because every phase block runs `init`
  * again inside a live `ralph-wiggum` run: a re-recorded baseline would hide
- * the repositories that moved since, a second row would break the report's
- * one-row-per-phase reading, and an overwritten `settings.json` would reset
- * the cap that decides when the fixpoint stops.
+ * the repositories that moved since, and a second row would break the
+ * report's one-row-per-phase reading.
  */
 
 import { describe, expect, test } from "bun:test";
