@@ -1,26 +1,21 @@
 #!/usr/bin/env bun
 /**
- * Ralph REPORT node — the lifecycle summary (spec §4.2).
+ * Ralph REPORT node — the lifecycle summary (one-shot review §5).
  *
  * One script, four modes, read from `INPUTS_MODE` (`with: {mode: …}` in the
- * workflow). `auto` prints the summary §4.2 quotes and belongs to
+ * workflow). `auto` prints the summary §5.1 quotes and belongs to
  * `ralph-wiggum`; `plan`, `build` and `review` print one phase block's interim
  * report and belong to the phase workflows of §12.3. Composed, the block
  * reports run too: their lines say what each phase did while the run is still
  * going, and the summary at the end is the record (§12.4).
  *
- * Every phase row comes out of `outcome.log` and out of nothing else.
- * `ralph-snapshot` zeroes the per-phase counters at the start of each cycle, so
- * by report time those files hold the last cycle's numbers only; anything a row
- * needs — the build's iteration count, the review's pass and audited count, the
- * open items a cycle left behind — is written into the log line by the cap
- * script that ended the phase.
- *
- * The log splits into cycles on its `cycle N:` lines, which `ralph-cycle-cap`
- * appends when a build-review cycle finishes: the lines before the first one
- * belong to `seed` and `plan`, and the lines after one belong to the next
- * cycle. A phase with no line in its block did not run, and the block's own
- * `cycle N:` line is what says why.
+ * Every phase row comes out of `outcome.log` and out of nothing else. Every
+ * phase block that starts writes exactly one row — its gate's skip row, its cap
+ * script's row or the review exit's row (one-shot review §4.1) — so the summary
+ * assigns the rows positionally: the `seed:` row, the `plan:` row, the first
+ * `build:` row, the `review:` row and the second `build:` row, numbered 1 to 5
+ * in ralph's `auto_report` format (one-shot review §5.1). A phase with no row
+ * did not start.
  *
  * It exits 0 in every case, an abort included. This is a report; `ralph-guard`
  * has already failed the run, and a report that failed as well would bury the
@@ -31,7 +26,7 @@
  * fails it.
  *
  * Invoked by Archon as a named script (`runtime: bun`) with `trigger_rule:
- * all_done` and `always_run: true`, so it runs whatever the cycle group did.
+ * all_done` and `always_run: true`, so it runs whatever the phases before it did.
  * `ARTIFACTS_DIR` says where the log and the marker are.
  *
  * The repositories row is the one figure that comes from outside the log:
@@ -54,18 +49,6 @@ export function isMode(value: string | undefined): value is Mode {
   return MODES.some((mode) => mode === value);
 }
 
-/** A cycle block closes on the line `ralph-cycle-cap` appends to end a cycle. */
-const CYCLE_END = /^cycle \d+: /;
-
-/** `cycle N: clean — no open items remain`: the finished-lifecycle line. */
-const CYCLE_CLEAN = /^cycle \d+: clean\b/;
-
-/** `cycle N: O open items remain — …`: the only cycle line that counts them. */
-const CYCLE_OPEN = /^cycle \d+: (\d+) open items remain/;
-
-/** `cycle N: reached the cycle cap of C …`: open items, named but not counted. */
-const CYCLE_CAPPED = /^cycle \d+: reached the cycle cap\b/;
-
 /**
  * The state of a phase that wrote no row. Every phase that starts writes one,
  * so an absent row means the run never reached it — ralph's own word for that
@@ -81,112 +64,44 @@ const ARTIFACTS_ROW =
   "Artifacts: IMPLEMENTATION_PLAN.md and PROGRESS.md in the tree; " +
   "previous cycle under .ralph/<timestamp>/";
 
-/** One build-review cycle's rows, as `outcome.log` records them. */
-export interface Cycle {
-  build: string | null;
-  review: string | null;
-  /** The `cycle N:` line that closed the block, or `null` when the cycle never ended. */
-  end: string | null;
-}
-
-export interface Outcome {
-  seed: string | null;
-  plan: string | null;
-  cycles: Cycle[];
-}
+/** The summary's phases in run order: `ralph-wiggum` builds before and after the review. */
+const PHASES = ["seed", "plan", "build", "review", "build"] as const;
 
 /**
- * Split `outcome.log` into the `seed` and `plan` rows and one block per cycle.
+ * Each phase's `outcome.log` row, aligned with `PHASES`, or `null` for a phase
+ * that wrote none.
  *
- * Lines that match no phase prefix are dropped, which is what keeps a build
- * abort readable: `ralph-build-cap` appends `build: push rejected` followed by
- * git's own output, and those extra lines are evidence for `abort.txt`, not
- * rows. A trailing block is kept only when it holds a phase line, because the
- * healthy case ends the log with a `cycle N:` line and the block it opens is
- * empty.
+ * A line fills the first empty slot whose label it carries, so the first
+ * `build:` row is phase 3 and the second is phase 5. Lines that match no phase
+ * prefix are dropped, which is what keeps a build abort readable:
+ * `ralph-build-cap` appends `build: push rejected` followed by git's own
+ * output, and those extra lines are evidence for `abort.txt`, not rows.
  */
-export function parseOutcome(log: string): Outcome {
-  const cycles: Cycle[] = [];
-  let seed: string | null = null;
-  let plan: string | null = null;
-  let current: Cycle = { build: null, review: null, end: null };
-
+export function parseOutcome(log: string): (string | null)[] {
+  const rows: (string | null)[] = PHASES.map(() => null);
   for (const line of log.split("\n")) {
-    if (CYCLE_END.test(line)) {
-      current.end = line;
-      cycles.push(current);
-      current = { build: null, review: null, end: null };
-    } else if (line.startsWith("build: ")) current.build = line;
-    else if (line.startsWith("review: ")) current.review = line;
-    else if (line.startsWith("seed: ")) seed = line;
-    else if (line.startsWith("plan: ")) plan = line;
+    const slot = PHASES.findIndex((label, i) => rows[i] === null && line.startsWith(`${label}: `));
+    if (slot !== -1) rows[slot] = line;
   }
-  if (current.build !== null || current.review !== null) cycles.push(current);
-
-  return { seed, plan, cycles };
+  return rows;
 }
 
-/**
- * The open count a cycle's closing line names: `0` for a clean cycle, the
- * number it states, or `null` when no count is available — the cycle cap's line
- * names open items without counting them, and an unfinished cycle has no line
- * at all.
- */
-function openAfter(end: string | null): number | null {
-  if (end === null) return null;
-  if (CYCLE_CLEAN.test(end)) return 0;
-  const named = CYCLE_OPEN.exec(end);
-  return named?.[1] === undefined ? null : Number(named[1]);
-}
-
-/**
- * The skip cause of a review guard whose third term is false: the anchor set is
- * empty, so a pass would have no specification to measure the tree against.
- *
- * It names `ralph-plan` and not `ralph-build` because the citation is the plan's
- * to write. The cause outranks the shipped one for the same reason: the row is
- * only reached with nothing open, so a plan that also shipped nothing has no
- * item for `ralph-build` to take, and `ralph-plan` is the next command under
- * both causes at once.
- */
-const NO_CITED_SPECS = "no cited specs — run ralph-plan to anchor the items on them";
-
-/** Why `review` was skipped, read off the same cycle line the row belongs to. */
-function reviewSkipped(open: number | null, uncited: boolean): string {
-  // `open == 0` is the guard `review` is declared with (§3.1), so a clean cycle
-  // that skipped review had nothing shipped to audit — or nothing cited to
-  // audit it against, which the operator resolves differently.
-  if (open === 0) return uncited ? NO_CITED_SPECS : "no shipped items to audit";
-  // The cycle cap's wording, uncounted, for the cycle whose line does not count.
-  if (open === null) return "open items remain";
-  return `${open} open items remain`;
-}
-
-/** A top-level row. The state column sits at column 11, as ralph's `%-9s` puts it. */
+/** A block report's row. The state column sits at column 11, as ralph's `%-9s` puts it. */
 function topRow(label: string, state: string): string {
   return `  ${label.padEnd(9)}${state}`;
 }
 
-/** A row inside a cycle block: indented two further, aligned to the same column. */
-function cycleRow(label: string, state: string): string {
-  return `    ${label.padEnd(7)}${state}`;
+/** A summary row in ralph's `  %d %-9s %s` format. */
+function numberedRow(position: number, label: string, state: string): string {
+  return `  ${position} ${label.padEnd(9)} ${state}`;
 }
 
 /**
- * The state column of one phase row.
- *
- * `absent` is the state for a phase with no line, and `suffix` the clause a
- * `ran` row carries beyond its log line. The `<phase>: ` prefix is sliced off
- * the line because the label already carries it.
+ * The state column of one phase row. The `<phase>: ` prefix is sliced off the
+ * line because the label already carries it.
  */
-function phaseState(
-  label: string,
-  line: string | null,
-  abort: string | null,
-  absent: string,
-  suffix = "",
-): string {
-  if (line === null) return absent;
+function phaseState(label: string, line: string | null, abort: string | null): string {
+  if (line === null) return NOT_REACHED;
   // Both abort paths append their marker text to `outcome.log` as well as
   // writing `abort.txt`, so the phase that aborted is the one whose line is
   // that text. The first line is printed whole, prefix included: it is the
@@ -195,30 +110,10 @@ function phaseState(
   const text = line.slice(label.length + 2);
   // The phase gate writes its own skip row (one-shot review §4.1), so it is not a run.
   if (text.startsWith(SKIPPED)) return text;
-  return `ran — ${text}${suffix}`;
+  return `ran — ${text}`;
 }
 
-/**
- * How the lifecycle ended, from the last cycle's closing line.
- *
- * The abort is checked first. Neither guard lets a cycle close after writing
- * the marker, so the two cannot disagree today, but a run that failed must
- * never report a clean result because of a line that arrived anyway.
- */
-function resultRow(cycles: Cycle[], abort: string | null): string {
-  const n = cycles.length;
-  if (n === 0) return `  Result: ${NOT_REACHED}`;
-  const after = `after ${n} ${n === 1 ? "cycle" : "cycles"}`;
-  const end = cycles[n - 1]?.end ?? null;
-  if (abort !== null) return `  Result: failed ${after}`;
-  if (end !== null && CYCLE_CLEAN.test(end)) return `  Result: clean ${after}`;
-  if (end !== null && CYCLE_CAPPED.test(end)) return `  Result: stopped at the cycle cap ${after}`;
-  // A cycle that opened another one and then stopped: the group hit its own
-  // `max_iterations`, or a node in it failed for a reason no marker records.
-  return `  Result: stopped with open items ${after}`;
-}
-
-/** The plan's three counts, through the same path the cycle guards count with. */
+/** The plan's three counts, through the same path the phase gates count with. */
 function planRow(): string {
   try {
     const { open, shipped, superseded } = counts();
@@ -227,27 +122,6 @@ function planRow(): string {
     // Reachable: `report` is `always_run`, so it runs after a `seed` that never
     // scaffolded the plan. Naming the gap beats printing three zeroes.
     return "Plan: no IMPLEMENTATION_PLAN.md in the tree";
-  }
-}
-
-/**
- * Whether the plan cites no spec, through the same live read `planRow` makes.
- *
- * A skipped node writes no row, so the third guard term is derived from the plan
- * as it stands rather than from `outcome.log`. One read explains a row in every
- * cycle block, the ones that closed earlier in an `auto` run included: the
- * anchor set never narrows, `plan` runs once before the group, and a widening
- * needs a pass that a set of nothing never gets (§4).
- *
- * An unreadable plan is **not** uncited. `counts` fails the run on a missing
- * artifact, so the other rows report that state, and claiming the gate fired
- * would name a cause the run never reached.
- */
-function uncitedPlan(): boolean {
-  try {
-    return counts().cited === 0;
-  } catch {
-    return false;
   }
 }
 
@@ -324,51 +198,16 @@ export function movedRepos(artifactsDir: string): string[] {
   return rows;
 }
 
-/** What every renderer reads: the parsed log and the abort marker's first line. */
-function readRun(artifactsDir: string): { outcome: Outcome; abort: string | null } {
-  return {
-    outcome: parseOutcome(readArtifact(artifactsDir, "outcome.log")),
-    abort: firstLine(readArtifact(artifactsDir, "abort.txt")),
-  };
-}
-
 /** The summary, one string per line. */
 export function report(artifactsDir: string): string[] {
-  const {
-    outcome: { seed, plan, cycles },
-    abort,
-  } = readRun(artifactsDir);
+  const rows = parseOutcome(readArtifact(artifactsDir, "outcome.log"));
+  const abort = firstLine(readArtifact(artifactsDir, "abort.txt"));
 
-  const lines = [
-    "Ralph lifecycle summary",
-    topRow("seed", phaseState("seed", seed, abort, NOT_REACHED)),
-    topRow("plan", phaseState("plan", plan, abort, NOT_REACHED)),
-  ];
-  // Read once, before any block renders: every block's skipped review shares
-  // the one anchor set the run worked from.
-  const uncited = uncitedPlan();
-  cycles.forEach((cycle, index) => {
-    // The index, not the N in the line: a cycle whose guard failed mid-way has
-    // no `cycle N:` line at all, and its block still needs a header.
-    lines.push(`  cycle ${index + 1}`);
-    const open = openAfter(cycle.end);
-    lines.push(
-      cycleRow("build", phaseState("build", cycle.build, abort, "skipped — no open items")),
-    );
-    lines.push(
-      cycleRow(
-        "review",
-        phaseState(
-          "review",
-          cycle.review,
-          abort,
-          `skipped — ${reviewSkipped(open, uncited)}`,
-          open === null ? "" : `, filed ${open} findings`,
-        ),
-      ),
-    );
+  const lines = ["Ralph lifecycle summary"];
+  PHASES.forEach((label, i) => {
+    lines.push(numberedRow(i + 1, label, phaseState(label, rows[i] ?? null, abort)));
   });
-  lines.push(resultRow(cycles, abort), "", planRow());
+  lines.push("", planRow());
   // No line at all when nothing moved: a run that shipped nothing says so in
   // its phase rows already, and an empty list reads as a missing number.
   const moved = movedRepos(artifactsDir);
@@ -402,7 +241,7 @@ export function lastRow(log: string, label: string): string | null {
 function phaseReport(artifactsDir: string, label: string): string[] {
   const line = lastRow(readArtifact(artifactsDir, "outcome.log"), label);
   const abort = firstLine(readArtifact(artifactsDir, "abort.txt"));
-  return [topRow(label, phaseState(label, line, abort, NOT_REACHED)), "", planRow()];
+  return [topRow(label, phaseState(label, line, abort)), "", planRow()];
 }
 
 /** The `plan` block's report. */
