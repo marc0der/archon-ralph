@@ -34,9 +34,9 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { appendOutcome, repoState, type Settings } from "./lib/ralph.ts";
+import { appendOutcome, CYCLE_BASE, repoState, type Settings } from "./lib/ralph.ts";
 
 const TEMPLATE_DIR = ".archon/ralph/templates";
 const ARCHIVE_DIR = ".ralph";
@@ -44,6 +44,9 @@ const GITIGNORE = ".gitignore";
 
 /** The two loop artifacts, archived and scaffolded as a pair. */
 const ARTIFACTS = ["IMPLEMENTATION_PLAN.md", "PROGRESS.md"] as const;
+
+/** What `archive` moves: the pair, and the cycle base, which is never scaffolded. */
+const ARCHIVED = [...ARTIFACTS, CYCLE_BASE] as const;
 
 /** The two ways to open a run: `ralph-wiggum`'s cycle, and `ralph init`. */
 const MODES = ["archive", "init"] as const;
@@ -71,18 +74,18 @@ function timestamp(now = new Date()): string {
 }
 
 /**
- * Move every artifact present at the root into `.ralph/<timestamp>/`. Returns
- * that directory, or `null` when neither artifact was present.
+ * Move every path of `ARCHIVED` present into `.ralph/<timestamp>/` under its
+ * basename. Returns that directory, or `null` when none was present.
  *
  * The directory is created lazily: an empty `.ralph/<timestamp>/` would read as
  * a cycle that shipped nothing, and `ralph-report` lists the archive.
  */
 export function archive(): string | null {
-  const present = ARTIFACTS.filter((name) => existsSync(name));
+  const present = ARCHIVED.filter((path) => existsSync(path));
   if (present.length === 0) return null;
   const dest = `${ARCHIVE_DIR}/${timestamp()}`;
   mkdirSync(dest, { recursive: true });
-  for (const name of present) renameSync(name, join(dest, name));
+  for (const path of present) renameSync(path, join(dest, basename(path)));
   return dest;
 }
 
