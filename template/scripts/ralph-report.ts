@@ -67,11 +67,14 @@ const CYCLE_OPEN = /^cycle \d+: (\d+) open items remain/;
 const CYCLE_CAPPED = /^cycle \d+: reached the cycle cap\b/;
 
 /**
- * The state of a phase whose block holds no line for it and says nothing about
- * why. `seed` and `plan` are unguarded (§3.1), so an absent row for either
- * means the run never reached it — ralph's own word for that state.
+ * The state of a phase that wrote no row. Every phase that starts writes one,
+ * so an absent row means the run never reached it — ralph's own word for that
+ * state.
  */
 const NOT_REACHED = "not reached";
+
+/** The state prefix of the skip row a phase gate appends. */
+const SKIPPED = "skipped — ";
 
 /** Where the run left its artifacts. The timestamp stays a placeholder, as in ralph. */
 const ARTIFACTS_ROW =
@@ -189,7 +192,10 @@ function phaseState(
   // that text. The first line is printed whole, prefix included: it is the
   // marker verbatim, and a row that disagrees with the marker is worth seeing.
   if (line === abort) return `failed — ${abort}`;
-  return `ran — ${line.slice(label.length + 2)}${suffix}`;
+  const text = line.slice(label.length + 2);
+  // The phase gate writes its own skip row (one-shot review §4.1), so it is not a run.
+  if (text.startsWith(SKIPPED)) return text;
+  return `ran — ${text}${suffix}`;
 }
 
 /**
@@ -374,43 +380,34 @@ export function report(artifactsDir: string): string[] {
 /* ── The block reports (§12.4) ───────────────────────────────────── */
 
 /**
- * The cycle a block is reporting on: the one block `ralph-cycle-cap` has not
- * closed yet, or `null` when the current cycle appended no row at all.
+ * The last `outcome.log` line of one phase, or `null` when the phase wrote none.
  *
- * The last `build:` or `review:` row in the whole log is the wrong row. A
- * review block skipped on its `when:` guard — the build stopped short and left
- * open items — would otherwise report the row of an earlier cycle's review as
- * if this one had run. A closed trailing block means the same thing as no
- * block: whatever this cycle did, it wrote no row for it.
+ * Every block that starts writes exactly one row (one-shot review §4.1), so the
+ * last row with the label is this block's own. Composed, a `fix` block stopped
+ * by the abort check writes none and reads the first build's row; the summary
+ * is the record there (one-shot review §5.2).
  */
-function currentCycle(cycles: Cycle[]): Cycle | null {
-  const last = cycles.at(-1);
-  return last === undefined || last.end !== null ? null : last;
+export function lastRow(log: string, label: string): string | null {
+  return log.split("\n").findLast((line) => line.startsWith(`${label}: `)) ?? null;
 }
 
 /**
- * One phase block's report: the row its cap script appended, then the plan
- * counts.
+ * One phase block's report: its last row, then the plan counts.
  *
  * The row goes through the same `topRow` and `phaseState` as the summary, so
  * the interim lines a composed run prints line up with the summary that
- * follows them. Neither the cycle's `filed F findings` clause nor a counted
- * skip reason is available here: both are read off the `cycle N:` line, which
- * `ralph-cycle-cap` appends after the block has already reported.
+ * follows them. A block that wrote no row failed before its gate, so it is
+ * `not reached`.
  */
-function phaseReport(
-  label: string,
-  line: string | null,
-  abort: string | null,
-  absent: string,
-): string[] {
-  return [topRow(label, phaseState(label, line, abort, absent)), "", planRow()];
+function phaseReport(artifactsDir: string, label: string): string[] {
+  const line = lastRow(readArtifact(artifactsDir, "outcome.log"), label);
+  const abort = firstLine(readArtifact(artifactsDir, "abort.txt"));
+  return [topRow(label, phaseState(label, line, abort, NOT_REACHED)), "", planRow()];
 }
 
-/** The `plan` block's report. An absent row means the loop never ran (§3.1). */
+/** The `plan` block's report. */
 export function planReport(artifactsDir: string): string[] {
-  const { outcome, abort } = readRun(artifactsDir);
-  return phaseReport("plan", outcome.plan, abort, NOT_REACHED);
+  return phaseReport(artifactsDir, "plan");
 }
 
 /**
@@ -422,28 +419,15 @@ export function planReport(artifactsDir: string): string[] {
  * does.
  */
 export function buildReport(artifactsDir: string): string[] {
-  const { outcome, abort } = readRun(artifactsDir);
-  const build = currentCycle(outcome.cycles)?.build ?? null;
-  const lines = phaseReport("build", build, abort, "skipped — no open items");
+  const lines = phaseReport(artifactsDir, "build");
   const moved = movedRepos(artifactsDir);
   if (moved.length > 0) lines.push(`Repositories that moved: ${moved.join(", ")}`);
   return lines;
 }
 
-/**
- * The `review` block's report.
- *
- * The absent row is the guard's first clause and not its second: a block with
- * open items outstanding skipped for that reason, but the row it prints names
- * the audit, because that is the phase that did not happen. The third clause is
- * the one this row can tell apart, off the same plan read the summary makes;
- * the remaining two stay indistinguishable here and keep one wording (§4).
- */
+/** The `review` block's report. */
 export function reviewReport(artifactsDir: string): string[] {
-  const { outcome, abort } = readRun(artifactsDir);
-  const review = currentCycle(outcome.cycles)?.review ?? null;
-  const absent = uncitedPlan() ? NO_CITED_SPECS : "no shipped items to audit";
-  return phaseReport("review", review, abort, `skipped — ${absent}`);
+  return phaseReport(artifactsDir, "review");
 }
 
 /** The renderer each mode prints. Exhaustive over `MODES` by type. */
