@@ -23,7 +23,7 @@ It drops a self-contained `.archon/` workflow into your repo that:
 4. **Reports.** A factual summary of every phase, the plan counts and the repositories that moved.
 
 A guard that is false **skips** its phase; a skip is never a failure. Build stopping short skips
-review, and a later run picks the open items up.
+review, and the second build picks the open items up.
 
 Nothing reviews the second build's fixes. That is what ralph accepts too: a later run is where they
 get reviewed.
@@ -210,7 +210,7 @@ the supported path rather than as containment.
     ├── ralph-seed.ts               # archive the last cycle, scaffold, ignore
     ├── ralph-snapshot.ts           # reset a phase's counters and fingerprints
     ├── ralph-counts.ts             # the phase gate: counts, the guard and the skip row
-    ├── ralph-guard.ts              # fail the run on a cap script's abort marker
+    ├── ralph-guard.ts              # fail the run on an abort marker
     ├── ralph-plan-cap.ts           # plan loop: converge or cap
     ├── ralph-build-cap.ts          # build loop: exhaust, noop, budget, push
     ├── ralph-review-exit.ts        # the review exit line and the un-tick guard
