@@ -251,7 +251,7 @@ export function writeCycleBase(): boolean {
 }
 
 /** A `repoState()` listing as `[repo, sha]` pairs. */
-function parseRepoState(listing: string): [string, string][] {
+export function parseRepoState(listing: string): [string, string][] {
   return listing
     .split("\n")
     .filter((line) => line !== "")
