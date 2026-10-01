@@ -62,12 +62,19 @@ describe("the loop prompts", () => {
     });
   });
 
-  test("anchor the workspace root on pwd", async () => {
+  test("pin the workspace root on the git toplevel", async () => {
     await withTempRepo(() => {
       // §6: the prompts resolve the root themselves, because whether Archon
-      // substitutes into a `loop.command` is unverified. Without the anchor a
-      // prompt names a root it has no way to know.
-      expect(holding("Run `pwd` once")).toEqual(NAMES);
+      // substitutes into a `loop.command` is unverified. A `pwd` re-read from
+      // inside a nested clone re-roots the session on that clone.
+      expect(holding("Run `pwd` once")).toEqual([]);
+      for (const clause of [
+        "That path is fixed for the whole session",
+        "is **never** the root",
+        "keeps its full prefix from the root",
+      ]) {
+        expect({ clause, in: holding(clause) }).toEqual({ clause, in: NAMES });
+      }
     });
   });
 
